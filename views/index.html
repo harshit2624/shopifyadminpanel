@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shopify Commission App</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f6f8;
+            color: #333;
+            display: flex;
+        }
+        .sidebar {
+            width: 250px;
+            background-color: #fff;
+            border-right: 1px solid #dfe3e8;
+            padding: 20px;
+            height: 100vh;
+        }
+        .sidebar h1 {
+            font-size: 20px;
+            margin-top: 0;
+            margin-bottom: 30px;
+        }
+        .sidebar ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .sidebar ul li a {
+            display: block;
+            padding: 10px 15px;
+            text-decoration: none;
+            color: #333;
+            border-radius: 5px;
+        }
+        .sidebar ul li a:hover, .sidebar ul li a.active {
+            background-color: #f4f6f8;
+        }
+        .container {
+            flex: 1;
+            padding: 20px;
+        }
+        .main-content {
+            max-width: 960px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        h1 {
+            font-size: 24px;
+            margin-top: 0;
+        }
+        .commission-form {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #f9fafb;
+            border: 1px solid #dfe3e8;
+            border-radius: 5px;
+        }
+        .commission-form label {
+            font-weight: 600;
+            margin-right: 15px;
+        }
+        .commission-form input[type="number"] {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #c4cdd5;
+            margin-right: 10px;
+        }
+        .commission-form button {
+            padding: 8px 16px;
+            border: none;
+            background-color: #5a6ac4;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .commission-form button:hover {
+            background-color: #4e5bb5;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            text-align: left;
+            padding: 12px 15px;
+            border-bottom: 1px solid #dfe3e8;
+        }
+        th {
+            background-color: #f4f6f8;
+            font-weight: 600;
+        }
+        tr:hover {
+            background-color: #f9fafb;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h1>Commission App</h1>
+        <ul>
+            <li><a href="/" class="active">Orders</a></li>
+            <li><a href="/analytics">Analytics</a></li>
+        </ul>
+    </div>
+    <div class="container">
+        <div class="main-content">
+            <h1>Shopify Order Commission</h1>
+
+            <div class="commission-form">
+                <form action="/set-commission" method="POST">
+                    <label for="percentage">Commission Percentage:</label>
+                    <input type="number" id="percentage" name="percentage" value="{{commissionPercentage}}" min="0" step="0.01" required>
+                    <button type="submit">Set Percentage</button>
+                </form>
+            </div>
+
+            {{errorMessage}}
+
+            <h2>Orders</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Order #</th>
+                        <th>Date</th>
+                        <th>Total</th>
+                        <th>Commission Earned</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{ordersTable}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

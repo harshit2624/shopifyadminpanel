@@ -1,0 +1,14 @@
+{
+  "name": "shopify-commission-app",
+  "version": "1.0.0",
+  "description": "A simple Shopify app to calculate order commissions.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "mongodb": "^6.21.0"
+  },
+  "author": "",
+  "license": "ISC"
+}
