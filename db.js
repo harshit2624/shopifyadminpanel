@@ -1,6 +1,9 @@
 const { MongoClient } = require('mongodb');
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://workspace4626_db_user:fYRAgMwCZ4OKhj9g@cluster0.ookgvgu.mongodb.net/';
+// CRITICAL: Rely ONLY on the environment variable.
+// This prevents accidentally exposing credentials in your code.
+// If MONGODB_URI is not set in your environment (e.g., on Render), the app will fail loudly.
+const MONGODB_URI = process.env.MONGODB_URI;
 const DB_NAME = 'shopify_commission_app';
 
 let client;
@@ -8,12 +11,26 @@ let db;
 
 async function connectToDatabase() {
     if (!client) {
-        client = new MongoClient(MONGODB_URI);
-        await client.connect();
-        db = client.db(DB_NAME);
-        console.log('Connected to MongoDB');
+        if (!MONGODB_URI) {
+            throw new Error('MONGODB_URI environment variable is not set.');
+        }
+        try {
+            console.log('Attempting to connect to MongoDB...');
+            client = new MongoClient(MONGODB_URI);
+            await client.connect();
+            db = client.db(DB_NAME);
+            console.log('Successfully connected to MongoDB.');
+
+            // Perform a test write to confirm permissions and create a test collection.
+            const testCollection = db.collection('connection_test');
+            await testCollection.updateOne({ test: 'ping' }, { $set: { timestamp: new Date() } }, { upsert: true });
+            console.log('Successfully performed a test write to the database.');
+        } catch (error) {
+            console.error('Failed to connect to MongoDB:', error);
+            throw error; // Re-throw the error to stop the application from proceeding without a DB
+        }
     }
-    return db;
+    return db; // This should be outside the if block to always return the db object
 }
 
 async function getCommissionPercentage() {
