@@ -82,11 +82,48 @@ async function getAllProductViewCounts() {
     return viewCounts;
 }
 
+async function createVendor(vendorData) {
+    const db = await connectToDatabase();
+    const collection = db.collection('vendors');
+    const result = await collection.insertOne(vendorData);
+    return result;
+}
+
+async function getVendors() {
+    const db = await connectToDatabase();
+    const collection = db.collection('vendors');
+    return await collection.find({}).toArray();
+}
+
+async function getVendorById(vendorId) {
+    const { ObjectId } = require('mongodb');
+    const db = await connectToDatabase();
+    const collection = db.collection('vendors');
+    return await collection.findOne({ _id: new ObjectId(vendorId) });
+}
+
+async function getProductsByVendor(vendorName) {
+    const db = await connectToDatabase();
+    const collection = db.collection('products');
+    return await collection.find({ vendor: vendorName }).toArray();
+}
+
+async function trackFacebookEvent(eventData) {
+    const db = await connectToDatabase();
+    const collection = db.collection('facebook_events');
+    await collection.insertOne(eventData);
+}
+
 module.exports = {
     connectToDatabase,
     getCommissionPercentage,
     setCommissionPercentage,
     getProductViewCount,
     incrementProductViewCount,
-    getAllProductViewCounts
+    getAllProductViewCounts,
+    createVendor,
+    getVendors,
+    getVendorById,
+    getProductsByVendor,
+    trackFacebookEvent
 };
