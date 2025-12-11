@@ -29,7 +29,12 @@ document.addEventListener('DOMContentLoaded', () => {
    * Listener for the 'ViewContent' event.
    * This event typically fires when a user visits a product page.
    */
-  if (window.location.pathname.includes('/products/')) {
+  if (typeof fbq === 'function') {
+    fbq('track', 'ViewContent', {}, { eventID: 'ViewContent' });
+    
+    // We need to listen for the event after it has been processed by the pixel.
+    // The Facebook Pixel API doesn't have a direct callback for this,
+    // so we can use a small delay to capture the data.
     setTimeout(() => {
         const productHandle = window.location.pathname.split('/products/')[1];
         if(productHandle) {
@@ -89,47 +94,4 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
   });
-
-  /**
-   * Listener for the 'InitiateCheckout' event.
-   * This fires when a user clicks the checkout button.
-   */
-  const checkoutButtons = document.querySelectorAll('[name="checkout"], .checkout-button, [href*="/checkout"]');
-  checkoutButtons.forEach(button => {
-    button.addEventListener('click', () => {
-      fetch('/cart.js')
-        .then(response => response.json())
-        .then(cart => {
-          trackEvent({
-            eventName: 'InitiateCheckout',
-            cart: cart,
-            timestamp: new Date().toISOString()
-          });
-        });
-    });
-  });
-
-
-  /**
-   * Listener for the 'Purchase' event.
-   * This fires on the 'Thank You' or order confirmation page.
-   */
-  if (window.location.pathname.includes('/checkouts/') || window.location.pathname.includes('/orders/')) {
-    if (typeof Shopify !== 'undefined' && Shopify.checkout) {
-      const order = Shopify.checkout;
-      order.line_items.forEach(item => {
-        trackEvent({
-            eventName: 'Purchase',
-            orderId: order.order_id,
-            productId: item.product_id,
-            productName: item.title,
-            variantId: item.variant_id,
-            variantName: item.variant_title,
-            quantity: item.quantity,
-            price: item.price,
-            timestamp: new Date().toISOString()
-        });
-      });
-    }
-  }
 });

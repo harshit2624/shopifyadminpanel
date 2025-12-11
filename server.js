@@ -9,7 +9,8 @@ const fs = require('fs');
 const path = require('path');
 const querystring = require('querystring');
 const { URL } = require('url');
-const { getCommissionPercentage, setCommissionPercentage, incrementProductViewCount, getAllProductViewCounts, createVendor, getVendors, getVendorById, trackFacebookEvent } = require('./db');
+
+const { getCommissionPercentage, setCommissionPercentage, incrementProductViewCount, getAllProductViewCounts, createVendor, getVendors, getVendorById, trackFacebookEvent, getFacebookEvents } = require('./db');
 const sanitizeHtml = require('sanitize-html');
 
 const SHOP = process.env.SHOPIFY_SHOP_NAME;
@@ -125,6 +126,10 @@ function postToShopify(apiPath, payload) {
 }
 
 function putToShopify(apiPath, payload) {
+    console.log('--- PUT to Shopify ---');
+    console.log('Path:', apiPath);
+    console.log('Payload:', JSON.stringify(payload, null, 2));
+    console.log('-----------------------');
     return new Promise((resolve, reject) => {
         const data = JSON.stringify(payload);
         const options = {
@@ -262,7 +267,9 @@ async function fetchAllProducts(credentials) {
                                     return acc;
                                 }, {});
                                 if (links.next) {
-                                    apiPath = new URL(links.next).pathname + new URL(links.next).search;
+                                    // Extract the full path and query from the next link
+                                    const nextUrl = new URL(links.next);
+                                    apiPath = nextUrl.pathname + nextUrl.search;
                                 } else {
                                     apiPath = null;
                                 }
@@ -342,12 +349,14 @@ function renderView(res, templatePath, data, commissionPercentage) {
             return;
         }
 
+
         // Dynamically build the sidebar to ensure it's consistent across all pages.
         const sidebarLinks = [
             { href: '/', text: 'Dashboard' },
             { href: '/analytics', text: 'Analytics' },
             { href: '/vendors', text: 'Vendors' },
-            { href: '/send-orders', text: 'Send Orders' }
+            { href: '/send-orders', text: 'Send Orders' },
+            { href: '/facebook-events', text: 'Facebook Events' }
         ];
 
         const sidebarHtml = sidebarLinks.map(link => {
@@ -407,6 +416,7 @@ function renderView(res, templatePath, data, commissionPercentage) {
         } else {
             content = content.replace('{{errorMessage}}', '');
         }
+
 
         if (template.includes('{{vendorsTable}}')) {
             const vendors = data.vendors || [];
@@ -531,6 +541,62 @@ function renderView(res, templatePath, data, commissionPercentage) {
                 }).join('');
             }
             content = content.replace('{{vendorsTable}}', vendorsHtml);
+        }
+
+
+
+        if (template.includes('{{facebookEventsTable}}')) {
+            const events = data.events || [];
+            const productImages = data.productImages || {};
+            let eventsHtml;
+            if (events.length === 0) {
+                eventsHtml = '<tr><td colspan="5" class="no-events">No Facebook events found.</td></tr>';
+            } else {
+                eventsHtml = events.map(event => {
+                    const productName = event.productName || event.product_name || 'Unknown Product';
+                    const eventType = event.eventType || event.event_type || event.eventName || 'unknown';
+                    const timestamp = event.timestamp || event.time || event.created_at || new Date().toISOString();
+                    
+                    // Get product ID from event data
+                    const productId = event.productId || event.product_id || 'N/A';
+                    
+                    // Get product image using product ID
+                    const productImage = productImages[productId] || productImages[parseInt(productId)] || '';
+                    
+                    // Create event type badge with appropriate styling
+                    let eventTypeClass = 'event-other';
+                    let displayEventType = eventType;
+                    
+                    if (eventType.toLowerCase().includes('view')) {
+                        eventTypeClass = 'event-view-content';
+                        displayEventType = 'View Content';
+                    } else if (eventType.toLowerCase().includes('add') || eventType.toLowerCase().includes('cart')) {
+                        eventTypeClass = 'event-add-to-cart';
+                        displayEventType = 'Add to Cart';
+                    } else if (eventType.toLowerCase().includes('purchase') || eventType.toLowerCase().includes('buy')) {
+                        eventTypeClass = 'event-purchase';
+                        displayEventType = 'Purchase';
+                    }
+                    
+                    // Format timestamp
+                    const date = new Date(timestamp);
+                    const formattedTime = isNaN(date.getTime()) ? timestamp : date.toLocaleString();
+                    
+                    // Create product image HTML or placeholder
+                    const imageHtml = productImage 
+                        ? `<img src="${productImage}" alt="${productName}" width="50" style="border-radius: 4px;">`
+                        : `<div style="width: 50px; height: 50px; background-color: #f4f6f8; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #666;">No Image</div>`;
+                    
+                    return `<tr>
+                        <td>${imageHtml}</td>
+                        <td><strong>${productName}</strong></td>
+                        <td><span class="event-type ${eventTypeClass}">${displayEventType}</span></td>
+                        <td><code style="background-color: #f4f6f8; padding: 2px 6px; border-radius: 3px; font-size: 12px;">${productId}</code></td>
+                        <td>${formattedTime}</td>
+                    </tr>`;
+                }).join('');
+            }
+            content = content.replace('{{facebookEventsTable}}', eventsHtml);
         }
 
         if (templatePath.endsWith('send-orders.html')) {
@@ -865,7 +931,7 @@ const server = http.createServer(async (req, res) => {
                 }
 
                 // 1. Fetch all products from the main store to check for existing ones
-                const mainStoreProducts = await fetchFromShopify('/admin/api/2024-04/products.json');
+                const mainStoreProducts = await fetchAllProducts();
                 const mainStoreProductMap = mainStoreProducts.products.reduce((map, product) => {
                     map[product.handle] = product.id;
                     return map;
@@ -1036,6 +1102,43 @@ const server = http.createServer(async (req, res) => {
                 res.end(JSON.stringify({ message: `Sync failed: ${error.message}` }));
             }
         });
+    }
+
+
+
+    // --- Handle GET request for the Facebook Events page ---
+    else if (req.url === '/facebook-events' && req.method === 'GET') {
+        const facebookEventsTemplatePath = path.join(__dirname, 'views', 'facebook-events.html');
+        try {
+            // Fetch Facebook events with error handling
+            let events = [];
+            try {
+                events = await getFacebookEvents();
+            } catch (dbError) {
+                console.warn('Facebook events not available due to database connection issues:', dbError.message);
+                events = [];
+            }
+
+            // Fetch product data from Shopify
+            let productImages = {};
+            try {
+                const productDataResponse = await fetchAllProducts();
+                productDataResponse.products.forEach(p => {
+                    productImages[p.id] = p.image ? p.image.src : '';
+                });
+            } catch (shopifyError) {
+                console.warn('Could not fetch product data from Shopify:', shopifyError.message);
+            }
+
+            renderView(res, facebookEventsTemplatePath, { events, productImages }, 0);
+        } catch (error) {
+            console.error('Error in Facebook events page:', error);
+            renderView(res, facebookEventsTemplatePath, { 
+                events: [], 
+                productImages: {}, 
+                error: 'Unable to load Facebook events data' 
+            }, 0);
+        }
     }
     // --- Handle static files (like CSS, client-side JS) ---
     else if (req.method === 'GET' && req.url.startsWith('/public/')) {
