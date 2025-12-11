@@ -10,7 +10,7 @@ const path = require('path');
 const querystring = require('querystring');
 const { URL } = require('url');
 
-const { getCommissionPercentage, setCommissionPercentage, incrementProductViewCount, getAllProductViewCounts, createVendor, getVendors, getVendorById, trackFacebookEvent, getFacebookEvents } = require('./db');
+const { getCommissionPercentage, setCommissionPercentage, incrementProductViewCount, getAllProductViewCounts, createVendor, getVendors, getVendorById, trackFacebookEvent, getFacebookEvents, getTopFacebookEventsByProduct, getFacebookEventCounts } = require('./db');
 const sanitizeHtml = require('sanitize-html');
 
 const SHOP = process.env.SHOPIFY_SHOP_NAME;
@@ -381,8 +381,6 @@ function renderView(res, templatePath, data, commissionPercentage) {
                 </tr>`;
             }).join('');
             content = content.replace('{{ordersTable}}', ordersHtml);
-        } else if (template.includes('{{ordersTable}}')) {
-            content = content.replace('{{ordersTable}}', '<tr><td colspan="4">Could not fetch orders. Check your credentials and permissions.</td></tr>');
         }
 
         if (data.topSellingProducts) {
@@ -394,8 +392,6 @@ function renderView(res, templatePath, data, commissionPercentage) {
                 </tr>`;
             }).join('');
             content = content.replace('{{topSellingProducts}}', productsHtml);
-        } else if (template.includes('{{topSellingProducts}}')) {
-            content = content.replace('{{topSellingProducts}}', '<tr><td colspan="3">No data available.</td></tr>');
         }
 
         if (data.mostViewedProducts) {
@@ -407,14 +403,36 @@ function renderView(res, templatePath, data, commissionPercentage) {
                 </tr>`;
             }).join('');
             content = content.replace('{{mostViewedProducts}}', productsHtml);
-        } else if (template.includes('{{mostViewedProducts}}')) {
-            content = content.replace('{{mostViewedProducts}}', '<tr><td colspan="3">No data available.</td></tr>');
+        }
+
+        if (data.topViewedProducts) {
+            const cardsHtml = data.topViewedProducts.map(p => `
+                <div class="product-card">
+                    <img src="${p.image || ''}" alt="${p.title}">
+                    <div class="product-card-content">
+                        <div class="product-title" title="${p.title}">${p.title}</div>
+                        <div class="event-count">${p.count} Views</div>
+                    </div>
+                </div>
+            `).join('');
+            content = content.replace('{{topViewedProductsRow}}', cardsHtml);
+        }
+
+        if (data.topAddToCartProducts) {
+            const cardsHtml = data.topAddToCartProducts.map(p => `
+                <div class="product-card">
+                    <img src="${p.image || ''}" alt="${p.title}">
+                    <div class="product-card-content">
+                        <div class="product-title" title="${p.title}">${p.title}</div>
+                        <div class="event-count">${p.count} Adds to Cart</div>
+                    </div>
+                </div>
+            `).join('');
+            content = content.replace('{{topAddToCartProductsRow}}', cardsHtml);
         }
         
         if(data.error) {
              content = content.replace('{{errorMessage}}', `<p style="color: red;">Error: ${data.error}</p>`);
-        } else {
-            content = content.replace('{{errorMessage}}', '');
         }
 
 
@@ -557,13 +575,9 @@ function renderView(res, templatePath, data, commissionPercentage) {
                     const eventType = event.eventType || event.event_type || event.eventName || 'unknown';
                     const timestamp = event.timestamp || event.time || event.created_at || new Date().toISOString();
                     
-                    // Get product ID from event data
                     const productId = event.productId || event.product_id || 'N/A';
-                    
-                    // Get product image using product ID
                     const productImage = productImages[productId] || productImages[parseInt(productId)] || '';
                     
-                    // Create event type badge with appropriate styling
                     let eventTypeClass = 'event-other';
                     let displayEventType = eventType;
                     
@@ -578,11 +592,9 @@ function renderView(res, templatePath, data, commissionPercentage) {
                         displayEventType = 'Purchase';
                     }
                     
-                    // Format timestamp
                     const date = new Date(timestamp);
                     const formattedTime = isNaN(date.getTime()) ? timestamp : date.toLocaleString();
                     
-                    // Create product image HTML or placeholder
                     const imageHtml = productImage 
                         ? `<img src="${productImage}" alt="${productName}" width="50" style="border-radius: 4px;">`
                         : `<div style="width: 50px; height: 50px; background-color: #f4f6f8; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #666;">No Image</div>`;
@@ -621,7 +633,19 @@ function renderView(res, templatePath, data, commissionPercentage) {
             content = content.replace('{{vendorsSelectOptions}}', vendorsHtml);
         }
 
+        // Generic replacement for simple key-value pairs (for sticky filters)
+        for (const key in data) {
+            if (Object.hasOwnProperty.call(data, key)) {
+                if (typeof data[key] === 'string' || typeof data[key] === 'number') {
+                    content = content.replace(new RegExp(`{{${key}}}`, 'g'), data[key]);
+                }
+            }
+        }
+
         content = content.replace('{{sidebar}}', sidebarHtml);
+        
+        // Final cleanup of any un-replaced placeholders
+        content = content.replace(/{{[^{}]+}}/g, '');
 
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(content);
@@ -1107,35 +1131,77 @@ const server = http.createServer(async (req, res) => {
 
 
     // --- Handle GET request for the Facebook Events page ---
-    else if (req.url === '/facebook-events' && req.method === 'GET') {
+    else if (req.url.startsWith('/facebook-events') && req.method === 'GET') {
         const facebookEventsTemplatePath = path.join(__dirname, 'views', 'facebook-events.html');
         try {
-            // Fetch Facebook events with error handling
-            let events = [];
-            try {
-                events = await getFacebookEvents();
-            } catch (dbError) {
-                console.warn('Facebook events not available due to database connection issues:', dbError.message);
-                events = [];
-            }
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const filters = {
+                period: url.searchParams.get('period') || 'all',
+                startDate: url.searchParams.get('startDate') || '',
+                endDate: url.searchParams.get('endDate') || '',
+                eventType: url.searchParams.get('eventType') || 'all'
+            };
 
-            // Fetch product data from Shopify
-            let productImages = {};
-            try {
-                const productDataResponse = await fetchAllProducts();
+            // Fetch all data in parallel
+            const [
+                eventCounts,
+                topViewedData,
+                topAddToCartData,
+                productDataResponse,
+                events
+            ] = await Promise.all([
+                getFacebookEventCounts(filters),
+                getTopFacebookEventsByProduct('ViewContent', filters),
+                getTopFacebookEventsByProduct('AddToCart', filters),
+                fetchAllProducts(),
+                getFacebookEvents(filters)
+            ]);
+
+            // Create a product lookup map for efficient access
+            const productMap = new Map();
+            if (productDataResponse && productDataResponse.products) {
                 productDataResponse.products.forEach(p => {
-                    productImages[p.id] = p.image ? p.image.src : '';
+                    productMap.set(String(p.id), {
+                        title: p.title,
+                        image: p.image ? p.image.src : ''
+                    });
                 });
-            } catch (shopifyError) {
-                console.warn('Could not fetch product data from Shopify:', shopifyError.message);
             }
 
-            renderView(res, facebookEventsTemplatePath, { events, productImages }, 0);
+            // Combine top event data with product details
+            const topViewedProducts = topViewedData
+                .map(item => ({ ...item, ...productMap.get(String(item.productId)) }))
+                .filter(item => item.title); // Ensure product exists
+
+            const topAddToCartProducts = topAddToCartData
+                .map(item => ({ ...item, ...productMap.get(String(item.productId)) }))
+                .filter(item => item.title); // Ensure product exists
+
+            // Create a map of all product images for the main event table
+            const productImages = {};
+            for (const [key, value] of productMap.entries()) {
+                productImages[key] = value.image;
+            }
+            
+            const renderData = {
+                events,
+                productImages,
+                topViewedProducts,
+                topAddToCartProducts,
+                viewContentCount: eventCounts.ViewContent || 0,
+                addToCartCount: eventCounts.AddToCart || 0,
+                initiateCheckoutCount: eventCounts.InitiateCheckout || 0,
+                purchaseCount: eventCounts.Purchase || 0,
+                startDate: filters.startDate,
+                endDate: filters.endDate,
+                [`selectedPeriod_${filters.period}`]: 'selected',
+                [`selectedEventType_${filters.eventType}`]: 'selected'
+            };
+
+            renderView(res, facebookEventsTemplatePath, renderData, 0);
         } catch (error) {
             console.error('Error in Facebook events page:', error);
             renderView(res, facebookEventsTemplatePath, { 
-                events: [], 
-                productImages: {}, 
                 error: 'Unable to load Facebook events data' 
             }, 0);
         }

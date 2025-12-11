@@ -210,16 +210,189 @@ async function trackFacebookEvent(eventData) {
 }
 
 
-async function getFacebookEvents() {
+async function getFacebookEvents(filters = {}) {
     try {
         const db = await connectToDatabase();
+        if (!db) {
+            console.warn('Database not connected, cannot fetch events.');
+            return [];
+        }
+
         const collection = db.collection('facebook_events');
-        const events = await collection.find({}).sort({ timestamp: -1 }).toArray();
+        const query = {};
+
+        // Filter by Event Type
+        if (filters.eventType && filters.eventType !== 'all') {
+            // The event name in the database corresponds to filters.eventType
+            query.eventName = filters.eventType;
+        }
+
+        // Filter by Time Period
+        if (filters.period && filters.period !== 'all') {
+            const now = new Date();
+            let startDate;
+
+            switch (filters.period) {
+                case 'today':
+                    startDate = new Date(now.setHours(0, 0, 0, 0));
+                    break;
+                case 'last7days':
+                    const sevenDaysAgo = new Date();
+                    sevenDaysAgo.setDate(now.getDate() - 7);
+                    startDate = new Date(sevenDaysAgo.setHours(0, 0, 0, 0));
+                    break;
+                case 'mtd':
+                    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                    break;
+                case 'custom':
+                    if (filters.startDate) {
+                        // The date from the input is already in UTC 'YYYY-MM-DD'
+                        startDate = new Date(filters.startDate);
+                    }
+                    break;
+            }
+
+            if (startDate) {
+                query.timestamp = { ...query.timestamp, $gte: startDate.toISOString() };
+            }
+
+            if (filters.period === 'custom' && filters.endDate) {
+                // Set to the end of the selected day
+                const endDate = new Date(filters.endDate);
+                endDate.setHours(23, 59, 59, 999);
+                query.timestamp = { ...query.timestamp, $lte: endDate.toISOString() };
+            }
+        }
+
+        const events = await collection.find(query).sort({ timestamp: -1 }).toArray();
         return events;
     } catch (error) {
         console.error('Error fetching Facebook events:', error);
-        // Return empty array instead of throwing to prevent page crashes
         return [];
+    }
+}
+
+async function getTopFacebookEventsByProduct(eventName, filters = {}, limit = 30) {
+    try {
+        const db = await connectToDatabase();
+        if (!db) return [];
+
+        const collection = db.collection('facebook_events');
+        
+        const matchStage = { eventName: eventName };
+
+        // Apply Time Period Filter from filters object
+        if (filters.period && filters.period !== 'all') {
+            const now = new Date();
+            let startDate;
+
+            switch (filters.period) {
+                case 'today':
+                    startDate = new Date(now.setHours(0, 0, 0, 0));
+                    break;
+                case 'last7days':
+                    const sevenDaysAgo = new Date();
+                    sevenDaysAgo.setDate(now.getDate() - 7);
+                    startDate = new Date(sevenDaysAgo.setHours(0, 0, 0, 0));
+                    break;
+                case 'mtd':
+                    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                    break;
+                case 'custom':
+                    if (filters.startDate) {
+                        startDate = new Date(filters.startDate);
+                    }
+                    break;
+            }
+
+            if (startDate) {
+                matchStage.timestamp = { $gte: startDate.toISOString() };
+            }
+
+            if (filters.period === 'custom' && filters.endDate) {
+                const endDate = new Date(filters.endDate);
+                endDate.setHours(23, 59, 59, 999);
+                matchStage.timestamp = { ...matchStage.timestamp, $lte: endDate.toISOString() };
+            }
+        }
+
+        const pipeline = [
+            { $match: matchStage },
+            { $group: { _id: '$productId', count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: limit },
+            { $project: { productId: '$_id', count: 1, _id: 0 } }
+        ];
+
+        const results = await collection.aggregate(pipeline).toArray();
+        return results;
+    } catch (error) {
+        console.error(`Error getting top events for ${eventName}:`, error);
+        return [];
+    }
+}
+
+async function getFacebookEventCounts(filters = {}) {
+    try {
+        const db = await connectToDatabase();
+        if (!db) return {};
+
+        const collection = db.collection('facebook_events');
+        
+        const matchStage = {};
+
+        // Time Period Filter from filters object
+        if (filters.period && filters.period !== 'all') {
+            const now = new Date();
+            let startDate;
+
+            switch (filters.period) {
+                case 'today':
+                    startDate = new Date(now.setHours(0, 0, 0, 0));
+                    break;
+                case 'last7days':
+                    const sevenDaysAgo = new Date();
+                    sevenDaysAgo.setDate(now.getDate() - 7);
+                    startDate = new Date(sevenDaysAgo.setHours(0, 0, 0, 0));
+                    break;
+                case 'mtd':
+                    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                    break;
+                case 'custom':
+                    if (filters.startDate) {
+                        startDate = new Date(filters.startDate);
+                    }
+                    break;
+            }
+
+            if (startDate) {
+                matchStage.timestamp = { $gte: startDate.toISOString() };
+            }
+
+            if (filters.period === 'custom' && filters.endDate) {
+                const endDate = new Date(filters.endDate);
+                endDate.setHours(23, 59, 59, 999);
+                matchStage.timestamp = { ...matchStage.timestamp, $lte: endDate.toISOString() };
+            }
+        }
+
+        const pipeline = [
+            { $match: matchStage },
+            { $group: { _id: '$eventName', count: { $sum: 1 } } }
+        ];
+
+        const results = await collection.aggregate(pipeline).toArray();
+
+        // Convert the result array to a more useful object/map
+        const counts = results.reduce((acc, item) => {
+            acc[item._id] = item.count;
+            return acc;
+        }, {});
+
+        return counts;
+    } catch (error) {
+        console.error('Error getting Facebook event counts:', error);
+        return {};
     }
 }
 
@@ -235,5 +408,7 @@ module.exports = {
     getVendorById,
     getProductsByVendor,
     trackFacebookEvent,
-    getFacebookEvents
+    getFacebookEvents,
+    getTopFacebookEventsByProduct,
+    getFacebookEventCounts
 };
