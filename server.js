@@ -356,7 +356,8 @@ function renderView(res, templatePath, data, commissionPercentage) {
             { href: '/analytics', text: 'Analytics' },
             { href: '/vendors', text: 'Vendors' },
             { href: '/send-orders', text: 'Send Orders' },
-            { href: '/facebook-events', text: 'Facebook Events' }
+            { href: '/facebook-events', text: 'Facebook Events' },
+            { href: '/logout', text: 'Logout' }
         ];
 
         const sidebarHtml = sidebarLinks.map(link => {
@@ -652,8 +653,91 @@ function renderView(res, templatePath, data, commissionPercentage) {
     });
 }
 
+// --- Cookie Parser ---
+function parseCookies(request) {
+    const list = {};
+    const cookieHeader = request.headers?.cookie;
+    if (!cookieHeader) return list;
+
+    cookieHeader.split(';').forEach(function(cookie) {
+        let [ name, ...rest] = cookie.split('=');
+        name = name?.trim();
+        if (!name) return;
+        const value = rest.join('=').trim();
+        if (!value) return;
+        list[name] = decodeURIComponent(value);
+    });
+
+    return list;
+}
+
 // --- HTTP Server ---
 const server = http.createServer(async (req, res) => {
+    const cookies = parseCookies(req);
+    const isAuthenticated = cookies.loggedIn === 'true';
+
+    const loginTemplatePath = path.join(__dirname, 'views', 'login.html');
+
+    // --- Handle Login ---
+    if (!isAuthenticated && req.url !== '/login') {
+        // Allow access to public assets
+        if (req.url.startsWith('/public/')) {
+            // Let the existing static file handler do its job
+        } else {
+            res.writeHead(302, { 'Location': '/login' });
+            res.end();
+            return;
+        }
+    }
+
+    if (req.method === 'GET' && req.url === '/login') {
+        fs.readFile(loginTemplatePath, 'utf8', (err, content) => {
+            if (err) {
+                res.writeHead(500);
+                res.end('Error loading login page');
+                return;
+            }
+            res.writeHead(200, { 'Content-Type': 'text/html' });
+            res.end(content.replace('{{errorMessage}}', ''));
+        });
+        return;
+    }
+
+    if (req.method === 'POST' && req.url === '/login') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', () => {
+            const postData = querystring.parse(body);
+            if (postData.password === 'qqqq') {
+                res.writeHead(302, {
+                    'Set-Cookie': 'loggedIn=true; HttpOnly; Path=/',
+                    'Location': '/'
+                });
+                res.end();
+            } else {
+                fs.readFile(loginTemplatePath, 'utf8', (err, content) => {
+                    if (err) {
+                        res.writeHead(500);
+                        res.end('Error loading login page');
+                        return;
+                    }
+                    res.writeHead(401, { 'Content-Type': 'text/html' });
+                    res.end(content.replace('{{errorMessage}}', '<p class="error">Invalid password</p>'));
+                });
+            }
+        });
+        return;
+    }
+
+    if (req.method === 'GET' && req.url === '/logout') {
+        res.writeHead(302, {
+            'Set-Cookie': 'loggedIn=; HttpOnly; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+            'Location': '/login'
+        });
+        res.end();
+        return;
+    }
+
     const templatePath = path.join(__dirname, 'views', 'index.html');
 
     // --- Handle OPTIONS request for CORS preflight ---
