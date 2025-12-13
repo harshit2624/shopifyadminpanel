@@ -679,15 +679,16 @@ const server = http.createServer(async (req, res) => {
     const loginTemplatePath = path.join(__dirname, 'views', 'login.html');
 
     // --- Handle Login ---
-    if (!isAuthenticated && req.url !== '/login') {
-        // Allow access to public assets
-        if (req.url.startsWith('/public/')) {
-            // Let the existing static file handler do its job
-        } else {
-            res.writeHead(302, { 'Location': '/login' });
-            res.end();
-            return;
-        }
+    const publicRoutes = ['/login', '/track-fb-event'];
+    if (
+        !isAuthenticated &&
+        req.method !== 'OPTIONS' &&
+        !publicRoutes.some(p => req.url.startsWith(p)) &&
+        !req.url.startsWith('/public/')
+    ) {
+        res.writeHead(302, { 'Location': '/login' });
+        res.end();
+        return;
     }
 
     if (req.method === 'GET' && req.url === '/login') {
