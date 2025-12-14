@@ -465,8 +465,11 @@ function renderView(res, templatePath, data, commissionPercentage) {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                ${vendor.products.map(product => `
-                                                    <tr class="product-row" data-vendor-id="${vendor._id}" data-product='${JSON.stringify(product).replace(/'/g, "&apos;")}'>
+                                                ${vendor.products.map(product => {
+                                                    const productForDataAttr = { ...product };
+                                                    delete productForDataAttr.body_html;
+                                                    return `
+                                                    <tr class="product-row" data-vendor-id="${vendor._id}" data-product='${JSON.stringify(productForDataAttr).replace(/'/g, "&apos;").replace(/"/g, "&quot;")}'>
                                                         <td><input type="checkbox" class="product-checkbox" data-product-id="${product.id}"></td>
                                                         <td><img src="${product.image ? product.image.src : ''}" alt="${product.title}" width="40"></td>
                                                         <td>${product.title}</td>
@@ -475,7 +478,7 @@ function renderView(res, templatePath, data, commissionPercentage) {
                                                         <td>${product.variants.map(v => v.price).join(', ')}</td>
                                                         <td>${product.variants.map(v => v.compare_at_price || 'N/A').join(', ')}</td>
                                                     </tr>
-                                                `).join('')}
+                                                `}).join('')}
                                             </tbody>
                                         </table>
                                         <div style="margin-top: 15px;">
