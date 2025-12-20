@@ -396,6 +396,170 @@ async function getFacebookEventCounts(filters = {}) {
     }
 }
 
+async function createCroscrowVendor(vendorData) {
+    try {
+        const db = await connectToDatabase();
+        if (!db) {
+            throw new Error('Database not connected');
+        }
+        const collection = db.collection('croscrow_vendors');
+        const result = await collection.insertOne(vendorData);
+        return result;
+    } catch (error) {
+        console.error('Error creating croscrow vendor:', error);
+        throw error;
+    }
+}
+
+
+async function getCroscrowVendors() {
+    try {
+        const db = await connectToDatabase();
+        if (!db) {
+            return [];
+        }
+        const collection = db.collection('croscrow_vendors');
+        return await collection.find({}).toArray();
+    } catch (error) {
+        console.error('Error getting croscrow vendors:', error);
+        return [];
+    }
+}
+
+async function getCroscrowVendorById(vendorId) {
+    try {
+        const {
+            ObjectId
+        } = require('mongodb');
+        const db = await connectToDatabase();
+        if (!db) {
+            return null;
+        }
+        const collection = db.collection('croscrow_vendors');
+        return await collection.findOne({
+            _id: new ObjectId(vendorId)
+        });
+    } catch (error) {
+        console.error('Error getting croscrow vendor by ID:', error);
+        return null;
+    }
+}
+
+async function updateCroscrowVendor(vendorId, vendorData) {
+    try {
+        const {
+            ObjectId
+        } = require('mongodb');
+        const db = await connectToDatabase();
+        if (!db) {
+            throw new Error('Database not connected');
+        }
+        const collection = db.collection('croscrow_vendors');
+        const result = await collection.updateOne({
+            _id: new ObjectId(vendorId)
+        }, {
+            $set: vendorData
+        });
+        return result;
+    } catch (error) {
+        console.error('Error updating croscrow vendor:', error);
+        throw error;
+    }
+}
+
+async function getCommissionOrders() {
+    try {
+        const db = await connectToDatabase();
+        if (!db) {
+            return [];
+        }
+        const collection = db.collection('commission_orders');
+        return await collection.find({}).toArray();
+    } catch (error) {
+        console.error('Error getting commission orders:', error);
+        return [];
+    }
+}
+
+async function saveCommissionOrder(order) {
+    try {
+        const db = await connectToDatabase();
+        if (!db) {
+            throw new Error('Database not connected');
+        }
+        const collection = db.collection('commission_orders');
+        // Use order_id which is the shopify order id
+        const result = await collection.updateOne({ order_id: order.order_id }, { $set: order }, { upsert: true });
+        return result;
+    } catch (error) {
+        console.error('Error saving commission order:', error);
+        throw error;
+    }
+}
+
+async function getCroscrowSettings() {
+    try {
+        const db = await connectToDatabase();
+        if (!db) {
+            console.warn('Database not connected, using default settings');
+            return {}; // Default to empty object
+        }
+        const collection = db.collection('settings');
+        const doc = await collection.findOne({ key: 'croscrowDetails' });
+        return doc ? doc.value : {}; // Default to empty object
+    } catch (error) {
+        console.error('Error getting Croscrow settings:', error);
+        return {}; // Default to empty object
+    }
+}
+
+async function setCroscrowSettings(settings) {
+    try {
+        const db = await connectToDatabase();
+        if (!db) {
+            console.warn('Database not connected, cannot set Croscrow settings');
+            return;
+        }
+        const collection = db.collection('settings');
+        await collection.updateOne(
+            { key: 'croscrowDetails' },
+            { $set: { value: settings } },
+            { upsert: true }
+        );
+    } catch (error) {
+        console.error('Error setting Croscrow settings:', error);
+    }
+}
+
+async function saveManualOrder(order) {
+    try {
+        const db = await connectToDatabase();
+        if (!db) {
+            throw new Error('Database not connected');
+        }
+        const collection = db.collection('manual_orders');
+        const result = await collection.insertOne(order);
+        return result;
+    } catch (error) {
+        console.error('Error saving manual order:', error);
+        throw error;
+    }
+}
+
+async function getManualOrders() {
+    try {
+        const db = await connectToDatabase();
+        if (!db) {
+            return [];
+        }
+        const collection = db.collection('manual_orders');
+        return await collection.find({}).toArray();
+    } catch (error) {
+        console.error('Error getting manual orders:', error);
+        return [];
+    }
+}
+
 module.exports = {
     connectToDatabase,
     getCommissionPercentage,
@@ -410,5 +574,15 @@ module.exports = {
     trackFacebookEvent,
     getFacebookEvents,
     getTopFacebookEventsByProduct,
-    getFacebookEventCounts
+    getFacebookEventCounts,
+    createCroscrowVendor,
+    getCroscrowVendors,
+    getCroscrowVendorById,
+    updateCroscrowVendor,
+    getCommissionOrders,
+    saveCommissionOrder,
+    getCroscrowSettings,
+    setCroscrowSettings,
+    saveManualOrder,
+    getManualOrders,
 };

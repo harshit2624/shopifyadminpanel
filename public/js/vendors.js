@@ -5,6 +5,14 @@ document.addEventListener('DOMContentLoaded', () => {
         button.textContent = 'Syncing...';
         button.disabled = true;
 
+        const statusContainer = document.querySelector(`.sync-status[data-vendor-id="${vendorId}"]`);
+        const logsContainer = statusContainer.querySelector('.sync-logs');
+        const loadingIndicator = statusContainer.querySelector('.loading-indicator');
+
+        statusContainer.style.display = 'block';
+        logsContainer.textContent = '';
+        loadingIndicator.style.display = 'block'; // Assuming CSS for loading indicator exists
+
         try {
             const response = await fetch('/vendors/sync-products', {
                 method: 'POST',
@@ -13,23 +21,36 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             if (!response.ok) {
-                const errorResult = await response.json().catch(() => ({ message: 'An unknown error occurred.' }));
+                const errorResult = await response.json().catch(() => ({ message: 'An unknown error occurred during sync.' }));
                 throw new Error(errorResult.message);
             }
 
-            const result = await response.json();
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) {
+                    logsContainer.textContent += '\nSync complete!';
+                    break;
+                }
+                const chunk = decoder.decode(value, { stream: true });
+                logsContainer.textContent += chunk;
+            }
+            
             button.textContent = 'Synced!';
-            alert(result.message);
 
         } catch (error) {
             console.error('Sync failed:', error);
             button.textContent = 'Sync Failed';
-            alert(`Product sync failed: ${error.message}`);
+            logsContainer.textContent += `\n\nError: ${error.message}`;
         } finally {
+            loadingIndicator.style.display = 'none';
             setTimeout(() => {
                 button.textContent = originalText;
                 button.disabled = false;
-            }, 2000);
+                statusContainer.style.display = 'none';
+            }, 5000); // Keep logs visible for 5 seconds
         }
     }
 

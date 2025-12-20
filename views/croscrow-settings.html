@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Croscrow Settings</title>
+    <link rel="stylesheet" href="/public/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <aside class="sidebar">
+            <h2>Croscrow</h2>
+            <nav>
+                <ul>
+                    {{sidebar}}
+                </ul>
+            </nav>
+        </aside>
+        <main class="main-content">
+            <header>
+                <h1>Croscrow Settings</h1>
+            </header>
+            <section>
+                <form action="/croscrow-settings" method="POST" class="form-container">
+                    <div class="form-group">
+                        <label for="logo_url">Logo URL</label>
+                        <input type="text" id="logo_url" name="logo_url" value="{{settings.logo_url}}">
+                    </div>
+                    <div class="form-group">
+                        <label for="gst_details">GST Details</label>
+                        <input type="text" id="gst_details" name="gst_details" value="{{settings.gst_details}}">
+                    </div>
+                    <div class="form-group">
+                        <label for="address">Address</label>
+                        <textarea id="address" name="address" rows="4">{{settings.address}}</textarea>
+                    </div>
+                    <button type="submit" class="button">Save Settings</button>
+                </form>
+            </section>
+        </main>
+    </div>
+</body>
+</html>

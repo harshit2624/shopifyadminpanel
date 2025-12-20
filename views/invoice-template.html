@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Commission Invoice</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f6f8;
+            color: #1a202c;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        .invoice-container {
+            max-width: 800px;
+            margin: 20px auto;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+        }
+
+        .invoice-header {
+            background-color: #4a5568;
+            color: #fff;
+            padding: 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .invoice-header h1 {
+            margin: 0;
+            font-size: 2.5rem;
+            font-weight: 700;
+        }
+        
+        .invoice-header .company-logo {
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .invoice-details, .invoice-billing {
+            padding: 40px;
+            display: flex;
+            justify-content: space-between;
+            line-height: 1.6;
+        }
+        
+        .invoice-billing {
+             border-top: 1px solid #e2e8f0;
+        }
+        
+        .invoice-billing strong {
+            color: #2d3748;
+        }
+
+        .invoice-billing > div {
+            width: 48%;
+            word-wrap: break-word;
+        }
+
+        .invoice-items table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .invoice-items thead {
+            background-color: #edf2f7;
+        }
+
+        .invoice-items th, .invoice-items td {
+            padding: 15px 40px;
+            text-align: left;
+        }
+
+        .invoice-items th {
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        .invoice-items tbody tr {
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .invoice-items tbody tr:last-child {
+            border-bottom: none;
+        }
+
+        .invoice-totals {
+            padding: 40px;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .invoice-totals table {
+            width: 50%;
+            max-width: 300px;
+            border-collapse: collapse;
+        }
+
+        .invoice-totals td {
+            padding: 10px;
+        }
+
+        .invoice-totals tr td:last-child {
+            text-align: right;
+        }
+
+        .invoice-totals .total-row td {
+            font-weight: 700;
+            font-size: 1.2rem;
+            border-top: 2px solid #2d3748;
+            padding-top: 15px;
+        }
+
+        .invoice-actions {
+            text-align: center;
+            padding: 20px;
+        }
+        
+        .print-btn {
+            background-color: #4a5568;
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .print-btn:hover {
+            background-color: #2d3748;
+        }
+
+        @media print {
+            body {
+                background-color: #fff;
+                margin: 0;
+                padding: 0;
+            }
+            .invoice-container {
+                box-shadow: none;
+                margin: 0;
+                max-width: 100%;
+                border-radius: 0;
+            }
+            .invoice-actions {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="invoice-actions">
+        <button class="print-btn" onclick="window.print()">Print or Download PDF</button>
+    </div>
+
+    <div class="invoice-container">
+        <div class="invoice-header">
+            <div class="company-logo">
+                {{#if croscrowSettings.logo_url}}
+                    <img src="{{croscrowSettings.logo_url}}" alt="Croscrow Logo" style="max-height: 80px;">
+                {{else}}
+                    Croscrow
+                {{/if}}
+            </div>
+            <h1>Invoice</h1>
+        </div>
+
+        <div class="invoice-details">
+            <div>
+                <p>
+                    <strong>Invoice #:</strong> {{order.order_number}}<br>
+                    <strong>Date Issued:</strong> {{invoice_date}}
+                </p>
+            </div>
+            <div>
+                 <p>
+                    <strong>Order ID:</strong> #{{order.order_number}}<br>
+                    <strong>Order Date:</strong> {{order_date}}
+                </p>
+            </div>
+        </div>
+        
+        <div class="invoice-billing">
+            <div>
+                <strong>Billed To:</strong><br>
+                {{vendor.name}}<br>
+                {{#if vendor.gst_no}}GST: {{vendor.gst_no}}<br>{{/if}}
+                {{vendor.address}}
+            </div>
+            <div>
+                <strong>From:</strong><br>
+                Croscrow<br>
+                {{#if croscrowSettings.gst_details}}GST: {{croscrowSettings.gst_details}}<br>{{/if}}
+                {{#if croscrowSettings.address}}{{croscrowSettings.address}}{{/if}}
+            </div>
+        </div>
+
+        <div class="invoice-items">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Description</th>
+                        <th>Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Commission on order #{{order.order_number}} for items:
+                            <ul>
+                            {{#each order.line_items}}
+                                <li>{{this.title}} (Qty: {{this.quantity}})</li>
+                            {{/each}}
+                            </ul>
+                        </td>
+                        <td>{{commissionable_amount_formatted}}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="invoice-totals">
+            <table>
+                 <tr>
+                    <td>Commissionable Amount</td>
+                    <td>{{commissionable_amount_formatted}}</td>
+                </tr>
+                 <tr>
+                    <td>Base Commission (20%)</td>
+                    <td>{{base_commission_formatted}}</td>
+                </tr>
+                {{#if commissionOrder.manual_shipping}}
+                <tr>
+                    <td>Shipping Charges</td>
+                    <td>{{shipping_formatted}}</td>
+                </tr>
+                {{/if}}
+                {{#if commissionOrder.manual_discount}}
+                <tr>
+                    <td>Discount ({{commissionOrder.discount_type}})</td>
+                    <td>-{{discount_formatted}}</td>
+                </tr>
+                {{/if}}
+                <tr class="total-row">
+                    <td>Subtotal</td>
+                    <td>{{subtotal_formatted}}</td>
+                </tr>
+                 <tr>
+                    <td>GST (18%)</td>
+                    <td>{{gst_formatted}}</td>
+                </tr>
+                {{#if commissionOrder.amount_received}}
+                <tr>
+                    <td>Amount Received</td>
+                    <td>-{{amount_received_formatted}}</td>
+                </tr>
+                {{/if}}
+                <tr class="total-row">
+                    <td>Net Settlement Amount</td>
+                    <td>{{total_commission_formatted}}</td>
+                </tr>
+            </table>
+        </div>
+    </div>
+
+</body>
+</html>

@@ -10,7 +10,7 @@ const path = require('path');
 const querystring = require('querystring');
 const { URL } = require('url');
 
-const { getCommissionPercentage, setCommissionPercentage, incrementProductViewCount, getAllProductViewCounts, createVendor, getVendors, getVendorById, trackFacebookEvent, getFacebookEvents, getTopFacebookEventsByProduct, getFacebookEventCounts } = require('./db');
+const { getCommissionPercentage, setCommissionPercentage, incrementProductViewCount, getAllProductViewCounts, createVendor, getVendors, getVendorById, trackFacebookEvent, getFacebookEvents, getTopFacebookEventsByProduct, getFacebookEventCounts, createCroscrowVendor, getCroscrowVendors, getCommissionOrders, saveCommissionOrder, getCroscrowVendorById, updateCroscrowVendor, getCroscrowSettings, setCroscrowSettings, saveManualOrder, getManualOrders } = require('./db');
 const sanitizeHtml = require('sanitize-html');
 
 const SHOP = process.env.SHOPIFY_SHOP_NAME;
@@ -294,6 +294,80 @@ async function fetchAllProducts(credentials) {
     return { products };
 }
 
+async function fetchAllOrders(credentials) {
+    let orders = [];
+    let apiPath = '/admin/api/2024-04/orders.json?status=any&limit=250'; // Fetch 250 orders per page
+
+    while (apiPath) {
+        const response = await new Promise((resolve, reject) => {
+            let hostname;
+            if (credentials) {
+                hostname = credentials.shopName
+                    .replace(/^(https?:\/\/)/, '')
+                    .replace(/\/$/, '');
+                if (!hostname.includes('.')) {
+                    hostname = `${hostname}.myshopify.com`;
+                }
+            } else {
+                hostname = `${SHOP}.myshopify.com`;
+            }
+
+            const options = {
+                hostname: hostname,
+                path: apiPath,
+                method: 'GET',
+                secureProtocol: 'TLSv1_2_method',
+                headers: {
+                    'X-Shopify-Access-Token': credentials ? credentials.accessToken : ACCESS_TOKEN,
+                    'Content-Type': 'application/json'
+                }
+            };
+
+            const req = https.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => data += chunk);
+                res.on('end', () => {
+                    if (res.statusCode >= 200 && res.statusCode < 300) {
+                        try {
+                            const parsedData = JSON.parse(data);
+                            orders = orders.concat(parsedData.orders);
+                            const linkHeader = res.headers.link;
+                            if (linkHeader) {
+                                const links = linkHeader.split(',').reduce((acc, link) => {
+                                    const match = link.match(/<(.+)>; rel="(.+)"/);
+                                    if (match) {
+                                        acc[match[2]] = match[1];
+                                    }
+                                    return acc;
+                                }, {});
+                                if (links.next) {
+                                    // Extract the full path and query from the next link
+                                    const nextUrl = new URL(links.next);
+                                    apiPath = nextUrl.pathname + nextUrl.search;
+                                } else {
+                                    apiPath = null;
+                                }
+                            } else {
+                                apiPath = null;
+                            }
+                            resolve();
+                        } catch (e) {
+                            reject(new Error('Failed to parse Shopify response.'));
+                        }
+                    } else {
+                        reject(new Error(`Shopify API responded with status ${res.statusCode}: ${data}`));
+                    }
+                });
+            });
+
+            req.on('error', (error) => reject(error));
+            req.end();
+        });
+    }
+
+    return { orders };
+}
+
 
 
 function calculateTopSellingProducts(orders, productImages) {
@@ -355,23 +429,30 @@ function renderView(res, templatePath, data, commissionPercentage) {
             { href: '/', text: 'Dashboard' },
             { href: '/analytics', text: 'Analytics' },
             { href: '/vendors', text: 'Vendors' },
+            { href: '/croscrow-vendors', text: 'Croscrow Vendors' },
+            { href: '/invoices', text: 'Croscrow Invoices' },
+            { href: '/croscrow-settings', text: 'Croscrow Settings' },
+            { href: '/sync-vendors', text: 'Sync Vendors' },
             { href: '/send-orders', text: 'Send Orders' },
             { href: '/facebook-events', text: 'Facebook Events' },
             { href: '/logout', text: 'Logout' }
         ];
 
+        const pageName = path.basename(templatePath, '.html');
         const sidebarHtml = sidebarLinks.map(link => {
-            // Determine the active page by comparing the link's href with the template path
-            const isActive = (link.href === '/' && templatePath.endsWith('index.html')) || templatePath.includes(link.href.substring(1));
+            const linkPage = link.href === '/' ? 'index' : link.href.substring(1);
+            const isActive = linkPage === pageName;
             const activeClass = isActive ? ' class="active"' : '';
             return `<li><a href="${link.href}"${activeClass}>${link.text}</a></li>`;
         }).join('\n            ');
+
+        template = template.replace('{{sidebar}}', sidebarHtml);
 
 
         // Replace placeholders
         let content = template.replace('{{commissionPercentage}}', commissionPercentage);
         
-        if (data.orders) {
+        if (data.orders && !templatePath.endsWith('invoices.html')) {
             const ordersHtml = data.orders.map(order => {
                 const commission = (parseFloat(order.total_price) * (commissionPercentage / 100)).toFixed(2);
                 return `<tr>
@@ -485,6 +566,10 @@ function renderView(res, templatePath, data, commissionPercentage) {
                                             <button class="button sync-selected-btn" data-vendor-id="${vendor._id}">Sync Selected</button>
                                             <button class="button sync-all-btn" data-vendor-id="${vendor._id}">Sync All</button>
                                         </div>
+                                        <div class="sync-status" data-vendor-id="${vendor._id}" style="margin-top: 15px; display: none;">
+                                            <div class="loading-indicator"></div>
+                                            <pre class="sync-logs"></pre>
+                                        </div>
                                     </div>
                                 </td>
                             </tr>
@@ -565,6 +650,73 @@ function renderView(res, templatePath, data, commissionPercentage) {
             content = content.replace('{{vendorsTable}}', vendorsHtml);
         }
 
+        if (template.includes('{{croscrowVendorsTable}}')) {
+            const vendors = data.vendors || [];
+            let vendorsHtml;
+            if (vendors.length === 0) {
+                vendorsHtml = '<tr><td colspan="4">No vendors found. Add one above to get started.</td></tr>';
+            } else {
+                vendorsHtml = vendors.map(vendor => {
+                    return `
+                        <tr>
+                            <td>${vendor.name}</td>
+                            <td>${vendor.gst_no}</td>
+                            <td>${vendor.address}</td>
+                            <td><a href="/edit-croscrow-vendor?id=${vendor._id}" class="button">Edit</a></td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+            content = content.replace('{{croscrowVendorsTable}}', vendorsHtml);
+        }
+
+
+
+        if (templatePath.endsWith('invoices.html')) {
+            const orders = data.orders || [];
+            const vendors = data.vendors || [];
+            let ordersHtml;
+            if (orders.length === 0) {
+                ordersHtml = '<tr><td colspan="9">No orders found.</td></tr>';
+            } else {
+                ordersHtml = orders.map(order => {
+                    const vendorOptions = vendors.map(vendor => {
+                        const isSelected = order.vendor_id && order.vendor_id === vendor._id.toString();
+                        return `<option value="${vendor._id}" ${isSelected ? 'selected' : ''}>${vendor.name}</option>`;
+                    }).join('');
+
+                    return `
+                        <tr data-order-id="${order.id}">
+                            <td>#${order.order_number}</td>
+                            <td>${new Date(order.created_at).toLocaleDateString()}</td>
+                            <td>${order.customer ? `${order.customer.first_name} ${order.customer.last_name}` : 'N/A'}</td>
+                            <td>$${order.total_price}</td>
+                            <td>
+                                <select class="vendor-select" data-order-id="${order.id}">
+                                    <option value="">Assign Vendor</option>
+                                    ${vendorOptions}
+                                </select>
+                            </td>
+                            <td><input type="number" class="manual-shipping" placeholder="e.g., 49" value="${order.manual_shipping || ''}"></td>
+                            <td>
+                                <select class="discount-type">
+                                    <option value="">Select</option>
+                                    <option value="croscrow" ${order.discount_type === 'croscrow' ? 'selected' : ''}>Croscrow</option>
+                                    <option value="vendor" ${order.discount_type === 'vendor' ? 'selected' : ''}>Vendor</option>
+                                </select>
+                            </td>
+                            <td><input type="number" class="manual-discount" placeholder="e.g., 100" value="${order.manual_discount || ''}"></td>
+                            <td><input type="number" class="amount-received" placeholder="e.g., 50" value="${order.amount_received || ''}"></td>
+                            <td class="action-cell">
+                                <button class="button save-btn" data-order-id="${order.id}">Save</button>
+                                <a href="/invoices/generate?order_id=${order.id}" class="button" target="_blank">Invoice</a>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+            content = content.replace('{{ordersTable}}', ordersHtml);
+        }
 
 
         if (template.includes('{{facebookEventsTable}}')) {
@@ -645,6 +797,156 @@ function renderView(res, templatePath, data, commissionPercentage) {
                 }
             }
         }
+        
+        // simple if/else helper
+        const ifRegex = /{{#if\s+(.*?)}}([\s\S]*?)(?:{{else}}([\s\S]*?))?{{\/if}}/g;
+        content = content.replace(ifRegex, (match, condition, ifTemplate, elseTemplate) => {
+            const keys = condition.split('.');
+            let value = data;
+            for (const k of keys) {
+                if (value && typeof value === 'object' && k in value) {
+                    value = value[k];
+                } else {
+                    value = undefined;
+                    break;
+                }
+            }
+
+            if (value) {
+                return ifTemplate;
+            } else if (elseTemplate) {
+                return elseTemplate;
+            } else {
+                return '';
+            }
+        });
+        
+        // context-aware each helper
+        const eachRegex = /{{#each\s+(.*?)}}([\s\S]*?){{\/each}}/g;
+        content = content.replace(eachRegex, (match, arrayName, template) => {
+            const items = data[arrayName];
+            if (!items) return '';
+
+            return items.map(item => {
+                let itemTemplate = template;
+
+                // Create a combined context for replacements
+                const combinedContext = { ...item, '..': data };
+
+                // Replace simple placeholders like {{key}}
+                itemTemplate = itemTemplate.replace(/{{\s*([\w\.]+)\s*}}/g, (mustacheMatch, key) => {
+                    // Handle ../ notation
+                    if (key.startsWith('../')) {
+                        const parentKey = key.substring(3);
+                        return data[parentKey] || '';
+                    }
+                    return item[key] || '';
+                });
+
+                // Handle simple helpers like {{#if (eq ../manual_vendor_id (string _id))}}
+                itemTemplate = itemTemplate.replace(/{{#if\s+\((.*?)\)\s*}}([\s\S]*?){{\/if}}/g, (ifMatch, condition, ifContent) => {
+                    const parts = condition.split(' ');
+                    if (parts.length === 3 && parts[0] === 'eq') {
+                        const val1 = parts[1].startsWith('../') ? data[parts[1].substring(3)] : item[parts[1]];
+                        const val2Raw = parts[2];
+                        let val2;
+                        if (val2Raw.startsWith('(string ')) {
+                             const innerKey = val2Raw.match(/\(string (.*?)\)/)[1];
+                             val2 = String(item[innerKey]);
+                        } else {
+                             val2 = item[val2Raw];
+                        }
+                        if (val1 == val2) {
+                            return ifContent;
+                        }
+                    }
+                    return '';
+                });
+
+                 // Replace nested {{#each}} loops
+                 itemTemplate = itemTemplate.replace(/{{#each\s+([\w\.]+)\s*}}([\s\S]*?){{\/each}}/g, (nestedMatch, nestedArrayName, nestedTemplate) => {
+                    if (nestedArrayName.startsWith('../')) {
+                        const parentArrayName = nestedArrayName.substring(3);
+                        const parentArray = data[parentArrayName];
+                        if (parentArray) {
+                            return parentArray.map(parentItem => {
+                                let nestedItemTemplate = nestedTemplate;
+                                // Perform replacements for the nested loop
+                                nestedItemTemplate = nestedItemTemplate.replace(/{{#if\s+\(eq\s+\.\.\/manual_vendor_id\s+\(string _id\)\)\s*}}([\s\S]*?){{\/if}}/g, (nestedIfMatch, nestedIfContent) => {
+                                    if (String(item.manual_vendor_id) === String(parentItem._id)) {
+                                        return nestedIfContent.replace(/{{\s*name\s*}}/g, parentItem.name);
+                                    }
+                                    return '';
+                                });
+                                return nestedItemTemplate;
+
+                            }).join('');
+                        }
+                    }
+                    return'';
+                });
+
+
+                return itemTemplate;
+            }).join('');
+        });
+
+        // simple replacement for nested objects
+        const regex = /{{\s*([\w.]+)\s*}}/g;
+        content = content.replace(regex, (match, key) => {
+            const keys = key.split('.');
+            let value = data;
+            for (const k of keys) {
+                if (value && typeof value === 'object' && k in value) {
+                    value = value[k];
+                } else {
+                    return '';
+                }
+            }
+            return value;
+        });
+
+        const helpers = {
+            formatDate: (dateString) => {
+                const date = new Date(dateString);
+                return date.toLocaleDateString('en-CA');
+            },
+            eq: (a, b) => a == b,
+            string: (val) => String(val)
+        };
+
+
+        const eachRegexWithContext = /{{#each\s+([\w\.]+)\s*}}([\s\S]*?){{\/each}}/g;
+        content = content.replace(eachRegexWithContext, (match, arrayName, template) => {
+            const items = arrayName.split('.').reduce((o, i) => o[i], { ...data, ...helpers });
+
+            if (!items) return '';
+
+            return items.map(item => {
+                let itemTemplate = template;
+                const allData = { ...item, '../vendors': data.vendors, ...helpers };
+
+                // Handle nested paths and helpers inside the loop
+                itemTemplate = itemTemplate.replace(/{{#if\s+\((.*?)\)\s*}}([\s\S]*?){{\/if}}/g, (ifMatch, ifCondition, ifTemplate) => {
+                    const [helper, ...args] = ifCondition.split(' ');
+                    const realArgs = args.map(arg => {
+                        return (allData[arg] !== undefined) ? allData[arg] : arg.replace(/"/g, '');
+                    });
+                    if (allData[helper] && allData[helper](...realArgs)) {
+                        return ifTemplate;
+                    }
+                    return '';
+                });
+
+                itemTemplate = itemTemplate.replace(/{{([\w\.\/]+)}}/g, (mustacheMatch, key) => {
+                    const value = key.split('.').reduce((o, i) => o && o[i], allData);
+                    return value !== undefined ? value : '';
+                });
+
+                 return itemTemplate;
+            }).join('');
+        });
+
 
         content = content.replace('{{sidebar}}', sidebarHtml);
         
@@ -911,6 +1213,422 @@ const server = http.createServer(async (req, res) => {
             }
         });
     }
+    // --- Handle GET and POST for Croscrow Vendors page ---
+    else if (req.url === '/croscrow-vendors' && req.method === 'GET') {
+        const vendorsTemplatePath = path.join(__dirname, 'views', 'croscrow-vendors.html');
+        try {
+            const vendors = await getCroscrowVendors();
+            renderView(res, vendorsTemplatePath, { vendors }, 0);
+        } catch (error) {
+            console.error('Error fetching croscrow vendors:', error);
+            renderView(res, vendorsTemplatePath, { error: 'Could not fetch croscrow vendors.' }, 0);
+        }
+    } else if (req.url === '/croscrow-vendors' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', async () => {
+            try {
+                const postData = querystring.parse(body);
+                await createCroscrowVendor({
+                    name: postData.name,
+                    gst_no: postData.gst_no,
+                    address: postData.address
+                });
+                res.writeHead(302, {
+                    'Location': '/croscrow-vendors'
+                });
+                res.end();
+            } catch (error) {
+                console.error('Error creating croscrow vendor:', error);
+                res.writeHead(500, {
+                    'Content-Type': 'text/plain'
+                });
+                res.end('Failed to create croscrow vendor.');
+            }
+        });
+    }
+    // --- Handle GET and POST for Croscrow Settings page ---
+    else if (req.url === '/croscrow-settings' && req.method === 'GET') {
+        const settingsTemplatePath = path.join(__dirname, 'views', 'croscrow-settings.html');
+        try {
+            const settings = await getCroscrowSettings();
+            renderView(res, settingsTemplatePath, { settings }, 0);
+        } catch (error) {
+            console.error('Error fetching croscrow settings:', error);
+            renderView(res, settingsTemplatePath, { error: 'Could not fetch croscrow settings.' }, 0);
+        }
+    } else if (req.url === '/croscrow-settings' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', async () => {
+            try {
+                const postData = querystring.parse(body);
+                await setCroscrowSettings({
+                    logo_url: postData.logo_url,
+                    gst_details: postData.gst_details,
+                    address: postData.address
+                });
+                res.writeHead(302, { 'Location': '/croscrow-settings' });
+                res.end();
+            } catch (error) {
+                console.error('Error saving croscrow settings:', error);
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Failed to save croscrow settings.');
+            }
+        });
+    }
+    // --- Handle GET and POST for Invoices page ---
+    else if (req.url === '/invoices' && req.method === 'GET') {
+        const invoicesTemplatePath = path.join(__dirname, 'views', 'invoices.html');
+        try {
+            const [orderData, vendors, commissionOrders, manualOrders] = await Promise.all([
+                fetchAllOrders(),
+                getCroscrowVendors(),
+                getCommissionOrders(),
+                getManualOrders()
+            ]);
+
+            const commissionOrdersMap = commissionOrders.reduce((map, order) => {
+                map[order.order_id] = order;
+                return map;
+            }, {});
+
+            const mergedOrders = orderData.orders.map(order => {
+                const commissionOrder = commissionOrdersMap[String(order.id)];
+                return {
+                    ...order,
+                    ...commissionOrder
+                };
+            });
+
+            renderView(res, invoicesTemplatePath, {
+                orders: mergedOrders,
+                vendors,
+                manualOrders
+            }, 0);
+        } catch (error) {
+            console.error('Error fetching invoices data:', error);
+            renderView(res, invoicesTemplatePath, {
+                error: 'Could not fetch invoices data.'
+            }, 0);
+        }
+    } else if (req.url === '/invoices/assign-vendor' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', async () => {
+            try {
+                const postData = JSON.parse(body);
+                await saveCommissionOrder({
+                    order_id: postData.order_id,
+                    vendor_id: postData.vendor_id,
+                    manual_shipping: postData.manual_shipping,
+                    discount_type: postData.discount_type,
+                    manual_discount: postData.manual_discount,
+                    amount_received: postData.amount_received
+                });
+                res.writeHead(200, {
+                    'Content-Type': 'application/json'
+                });
+                res.end(JSON.stringify({
+                    success: true
+                }));
+            } catch (error) {
+                console.error('Error assigning vendor:', error);
+                res.writeHead(500, {
+                    'Content-Type': 'application/json'
+                });
+                res.end(JSON.stringify({
+                    success: false,
+                    error: 'Failed to assign vendor.'
+                }));
+            }
+        });
+    } else if (req.url === '/invoices/generate-manual' && req.method === 'POST') {
+        const invoiceTemplatePath = path.join(__dirname, 'views', 'invoice-template.html');
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', async () => {
+            try {
+                const postData = querystring.parse(body);
+                const manualOrderId = postData.manual_order_id;
+                const manualAmount = parseFloat(postData.manual_amount);
+                const vendorId = postData.manual_vendor_id;
+
+                if (!manualOrderId || isNaN(manualAmount) || !vendorId) {
+                    throw new Error('Manual Order ID, a valid Amount, and a Vendor are required.');
+                }
+
+                const vendor = await getCroscrowVendorById(vendorId);
+                if (!vendor) {
+                    throw new Error('Selected vendor not found.');
+                }
+
+                // Create a commissionOrder object from the form data
+                const commissionOrder = {
+                    manual_shipping: postData.manual_shipping || 0,
+                    discount_type: postData.discount_type || '',
+                    manual_discount: postData.manual_discount || 0,
+                    amount_received: postData.amount_received || 0,
+                };
+
+                // Create a mock order object that mimics the Shopify order structure
+                const mockOrder = {
+                    order_number: manualOrderId,
+                    created_at: new Date().toISOString(),
+                    total_line_items_price: manualAmount,
+                    customer: { first_name: 'Manual', last_name: 'Entry' },
+                    shipping_address: { address1: '', city: '', zip: '', country: '' },
+                    line_items: [{ title: 'Manual Item', quantity: 1, price: manualAmount }]
+                };
+                
+                const croscrowSettings = await getCroscrowSettings();
+
+                // --- Calculation Logic (copied from /invoices/generate) ---
+                const currencyFormatter = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
+
+                const discount = parseFloat(commissionOrder.manual_discount || 0);
+                let commissionable_amount = manualAmount;
+
+                if (commissionOrder.discount_type === 'vendor') {
+                    commissionable_amount -= discount;
+                }
+
+                const base_commission = commissionable_amount * 0.20;
+
+                const shipping = parseFloat(commissionOrder.manual_shipping || 0);
+                
+                let subtotal = base_commission + shipping;
+                if (commissionOrder.discount_type === 'croscrow') {
+                    subtotal -= discount;
+                }
+
+                const gst = subtotal * 0.18;
+                let total_commission = subtotal + gst;
+
+                const amount_received = parseFloat(commissionOrder.amount_received || 0);
+                total_commission -= amount_received;
+
+                const invoiceData = {
+                    order: mockOrder,
+                    vendor: vendor,
+                    commissionOrder: commissionOrder,
+                    croscrowSettings,
+                    invoice_date: new Date().toLocaleDateString('en-CA'),
+                    order_date: new Date().toLocaleDateString('en-CA'),
+
+                    commissionable_amount_formatted: currencyFormatter.format(commissionable_amount),
+                    base_commission_formatted: currencyFormatter.format(base_commission),
+                    shipping_formatted: currencyFormatter.format(shipping),
+                    discount_formatted: currencyFormatter.format(discount),
+                    subtotal_formatted: currencyFormatter.format(subtotal),
+                    gst_formatted: currencyFormatter.format(gst),
+                    amount_received_formatted: currencyFormatter.format(amount_received),
+                    total_commission_formatted: currencyFormatter.format(total_commission),
+                };
+
+                renderView(res, invoiceTemplatePath, invoiceData, 0);
+
+            } catch (error) {
+                console.error('Error generating manual invoice:', error);
+                renderView(res, path.join(__dirname, 'views', 'invoice-template.html'), {
+                    error: `Could not generate manual invoice: ${error.message}`
+                }, 0);
+            }
+        });
+    } else if (req.url === '/invoices/save-manual' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', async () => {
+            try {
+                const postData = querystring.parse(body);
+                const manualOrder = {
+                    manual_order_id: postData.manual_order_id,
+                    manual_amount: postData.manual_amount,
+                    manual_vendor_id: postData.manual_vendor_id,
+                    manual_shipping: postData.manual_shipping,
+                    discount_type: postData.discount_type,
+                    manual_discount: postData.manual_discount,
+                    amount_received: postData.amount_received,
+                    createdAt: new Date()
+                };
+                await saveManualOrder(manualOrder);
+                res.writeHead(200, {
+                    'Content-Type': 'application/json'
+                });
+                res.end(JSON.stringify({
+                    success: true
+                }));
+            } catch (error) {
+                console.error('Error saving manual order:', error);
+                res.writeHead(500, {
+                    'Content-Type': 'application/json'
+                });
+                res.end(JSON.stringify({
+                    success: false,
+                    error: 'Failed to save manual order.'
+                }));
+            }
+        });
+    } else if (req.url.startsWith('/invoices/generate') && req.method === 'GET') {
+        const invoiceTemplatePath = path.join(__dirname, 'views', 'invoice-template.html');
+        try {
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const orderId = url.searchParams.get('order_id');
+            const [orderData, commissionOrders, croscrowSettings] = await Promise.all([
+                fetchFromShopify(`/admin/api/2024-04/orders/${orderId}.json`),
+                getCommissionOrders(),
+                getCroscrowSettings()
+            ]);
+
+            const order = orderData.order;
+            if (!order) {
+                throw new Error('Order not found.');
+            }
+
+            const commissionOrder = commissionOrders.find(co => co.order_id == order.id);
+            if (!commissionOrder) {
+                throw new Error('Commission data not found for this order. Please save vendor and other details first.');
+            }
+
+            const vendor = await getCroscrowVendorById(commissionOrder.vendor_id);
+            if (!vendor) {
+                throw new Error('Vendor not found for this order.');
+            }
+
+            // --- Calculation Logic ---
+            const currencyFormatter = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
+
+            const discount = parseFloat(commissionOrder.manual_discount || 0);
+            let commissionable_amount = parseFloat(order.total_line_items_price);
+
+            if (commissionOrder.discount_type === 'vendor') {
+                commissionable_amount -= discount;
+            }
+
+            const base_commission = commissionable_amount * 0.20;
+
+            const shipping = parseFloat(commissionOrder.manual_shipping || 0);
+            
+            let subtotal = base_commission + shipping;
+            if (commissionOrder.discount_type === 'croscrow') {
+                subtotal -= discount;
+            }
+
+            const gst = subtotal * 0.18;
+            let total_commission = subtotal + gst;
+
+            const amount_received = parseFloat(commissionOrder.amount_received || 0);
+            total_commission -= amount_received;
+
+            const invoiceData = {
+                order,
+                vendor,
+                commissionOrder,
+                croscrowSettings,
+                invoice_date: new Date().toLocaleDateString('en-CA'),
+                order_date: new Date(order.created_at).toLocaleDateString('en-CA'),
+
+                commissionable_amount_formatted: currencyFormatter.format(commissionable_amount),
+                base_commission_formatted: currencyFormatter.format(base_commission),
+                shipping_formatted: currencyFormatter.format(shipping),
+                discount_formatted: currencyFormatter.format(discount),
+                subtotal_formatted: currencyFormatter.format(subtotal),
+                gst_formatted: currencyFormatter.format(gst),
+                amount_received_formatted: currencyFormatter.format(amount_received),
+                total_commission_formatted: currencyFormatter.format(total_commission),
+            };
+
+            renderView(res, invoiceTemplatePath, invoiceData, 0);
+
+        } catch (error) {
+            console.error('Error generating invoice:', error);
+            renderView(res, path.join(__dirname, 'views', 'invoice-template.html'), {
+                error: `Could not generate invoice: ${error.message}`
+            }, 0);
+        }
+    }
+    // --- Handle GET and POST for Sync Vendors page ---
+    else if (req.url === '/sync-vendors' && req.method === 'GET') {
+        const syncVendorsTemplatePath = path.join(__dirname, 'views', 'sync-vendors.html');
+        renderView(res, syncVendorsTemplatePath, {}, 0);
+    } else if (req.url === '/sync-vendors' && req.method === 'POST') {
+        const syncVendorsTemplatePath = path.join(__dirname, 'views', 'sync-vendors.html');
+        try {
+            const {
+                products
+            } = await fetchAllProducts();
+            const existingVendors = await getCroscrowVendors();
+            const existingVendorNames = new Set(existingVendors.map(v => v.name));
+
+            const shopifyVendors = new Set(products.map(p => p.vendor));
+            let newVendorsCount = 0;
+
+            for (const vendorName of shopifyVendors) {
+                if (!existingVendorNames.has(vendorName)) {
+                    await createCroscrowVendor({
+                        name: vendorName,
+                        gst_no: '',
+                        address: ''
+                    });
+                    newVendorsCount++;
+                }
+            }
+
+            renderView(res, syncVendorsTemplatePath, {
+                message: `Sync complete. Added ${newVendorsCount} new vendors.`
+            }, 0);
+
+        } catch (error) {
+            console.error('Error syncing vendors:', error);
+            renderView(res, syncVendorsTemplatePath, {
+                message: `Error syncing vendors: ${error.message}`
+            }, 0);
+        }
+    }
+    // --- Handle GET and POST for Edit Croscrow Vendor page ---
+    else if (req.url.startsWith('/edit-croscrow-vendor') && req.method === 'GET') {
+        const editVendorTemplatePath = path.join(__dirname, 'views', 'edit-croscrow-vendor.html');
+        try {
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const vendorId = url.searchParams.get('id');
+            const vendor = await getCroscrowVendorById(vendorId);
+            if (!vendor) {
+                throw new Error('Vendor not found');
+            }
+            renderView(res, editVendorTemplatePath, {
+                vendor
+            }, 0);
+        } catch (error) {
+            console.error('Error fetching vendor for editing:', error);
+            renderView(res, path.join(__dirname, 'views', 'croscrow-vendors.html'), {
+                error: `Could not fetch vendor for editing: ${error.message}`
+            }, 0);
+        }
+    } else if (req.url === '/edit-croscrow-vendor' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', async () => {
+            try {
+                const postData = querystring.parse(body);
+                const vendorId = postData.id;
+                const vendorData = {
+                    gst_no: postData.gst_no,
+                    address: postData.address
+                };
+                await updateCroscrowVendor(vendorId, vendorData);
+                res.writeHead(302, {
+                    'Location': '/croscrow-vendors'
+                });
+                res.end();
+            } catch (error) {
+                console.error('Error updating croscrow vendor:', error);
+                res.writeHead(500, {
+                    'Content-Type': 'text/plain'
+                });
+                res.end('Failed to update croscrow vendor.');
+            }
+        });
+    }
     // --- Handle GET request for the Send Orders page ---
     else if (req.url === '/send-orders' && req.method === 'GET') {
         const sendOrdersTemplatePath = path.join(__dirname, 'views', 'send-orders.html');
@@ -1034,6 +1752,8 @@ const server = http.createServer(async (req, res) => {
         let body = '';
         req.on('data', chunk => body += chunk.toString());
         req.on('end', async () => {
+            res.writeHead(200, { 'Content-Type': 'text/plain', 'Transfer-Encoding': 'chunked' });
+            
             try {
                 const { products: productsToSync, vendorId } = JSON.parse(body);
                 const vendor = await getVendorById(vendorId);
@@ -1041,36 +1761,41 @@ const server = http.createServer(async (req, res) => {
                 if (!vendor) {
                     throw new Error('Vendor not found for syncing.');
                 }
+                
+                res.write(`Starting sync for ${vendor.name}...\n`);
 
                 // 1. Fetch all products from the main store to check for existing ones
+                res.write('Fetching existing products from your store...\n');
                 const mainStoreProducts = await fetchAllProducts();
                 const mainStoreProductMap = mainStoreProducts.products.reduce((map, product) => {
-                    map[product.handle] = product.id;
+                    map[product.title] = product.id; // Use title as the key
                     return map;
                 }, {});
+                res.write(`Found ${mainStoreProducts.products.length} existing products.\n\n`);
 
-                                                // 2. Loop and create or update each product on the main store
+                // 2. Loop and create or update each product on the main store
+                for (const product of productsToSync) {
+                    res.write(`Syncing: ${product.title}...\n`);
+                    // Ensure handle is set for checking existing products
+                    if (!product.handle) {
+                        product.handle = product.title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+                    }
+                    let newProductPayload;
+                    let updatePayload;
 
-                                                for (const product of productsToSync) {
-                                                    // Ensure handle is set for checking existing products
-                                                    if (!product.handle) {
-                                                        product.handle = product.title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-                                                    }
-                                                    let newProductPayload;
-                                                    let updatePayload;
-                                                                
-                                                                                    try {
-                                                                                        const existingProductId = mainStoreProductMap[product.handle];
-                                                                
-                                                                                        if (existingProductId) {
-                                                                                            // Product exists, so update it.
-                                                                                            const existingProduct = await fetchFromShopify(`/admin/api/2024-04/products/${existingProductId}.json`);
-                                                                                            const existingVariants = existingProduct.product.variants;
-                                                                                            const existingVariantMap = existingVariants.reduce((map, variant) => {
-                                                                                                if (variant.sku) map[variant.sku] = variant.id;
-                                                                                                return map;
-                                                                                            }, {});
-                                                                
+                    try {
+                        const existingProductId = mainStoreProductMap[product.title];
+
+                        if (existingProductId) {
+                            res.write(`  -> Found existing product. Updating...\n`);
+                            // Product exists, so update it.
+                            const existingProduct = await fetchFromShopify(`/admin/api/2024-04/products/${existingProductId}.json`);
+                            const existingVariants = existingProduct.product.variants;
+                            const existingVariantMap = existingVariants.reduce((map, variant) => {
+                                if (variant.sku) map[variant.sku] = variant.id;
+                                return map;
+                            }, {});
+
                             updatePayload = {
                                 product: {
                                     id: existingProductId,
@@ -1118,14 +1843,12 @@ const server = http.createServer(async (req, res) => {
                                     }),
                                 }
                             };
-                                                                                            await putToShopify(`/admin/api/2024-04/products/${existingProductId}.json`, updatePayload);
-                                                                                            console.log(`Updated product: ${product.title}`);
-                                                                                            console.log('--- Successful Update Payload ---');
-                                                                                            console.log(JSON.stringify(updatePayload, null, 2));
-                                                                                            console.log('---------------------------------');
-                                                                                        } else {
-                                                                                            // Product doesn't exist, so create it.
-                                                                                            
+                            await putToShopify(`/admin/api/2024-04/products/${existingProductId}.json`, updatePayload);
+                            res.write(`  -> Successfully updated.\n\n`);
+                        } else {
+                            res.write(`  -> Product not found. Creating new product...\n`);
+                            // Product doesn't exist, so create it.
+                            
                             newProductPayload = {
                                 product: {
                                     title: product.title,
@@ -1135,14 +1858,14 @@ const server = http.createServer(async (req, res) => {
                                     images: product.images || []
                                 }
                             };
-                                                                
-                                                                                            if (product.product_type) {
-                                                                                                newProductPayload.product.product_type = product.product_type;
-                                                                                            }
-                                                                                            if (product.tags && product.tags.length > 0) {
-                                                                                                newProductPayload.product.tags = Array.isArray(product.tags) ? product.tags.join(",") : product.tags;
-                                                                                            }
-                                                                
+
+                            if (product.product_type) {
+                                newProductPayload.product.product_type = product.product_type;
+                            }
+                            if (product.tags && product.tags.length > 0) {
+                                newProductPayload.product.tags = Array.isArray(product.tags) ? product.tags.join(",") : product.tags;
+                            }
+
                             if (product.variants && product.variants.length > 0) {
                                 newProductPayload.product.options = (product.options || []).map((opt, index) => ({
                                     name: opt.name,
@@ -1164,54 +1887,39 @@ const server = http.createServer(async (req, res) => {
                                     if (v.sku) variantPayload.sku = v.sku;
                                     return variantPayload;
                                 });
-                                                                                            } else {
-                                                                                                newProductPayload.product.options = [];
-                                                                                                newProductPayload.product.variants = [{
-                                                                                                    price: product.variants?.[0]?.price || '0',
-                                                                                                    inventory_management: 'shopify',
-                                                                                                    inventory_quantity: 0
-                                                                                                }];
-                                                                                            }
-                                                                                            
-                                                                                            // Create the product
-                                                                                            const newProductResponse = await postToShopify('/admin/api/2024-04/products.json', newProductPayload);
-                                                                                            const newProductId = newProductResponse.product.id;
-                                                                                            console.log(`Synced new product (base): ${product.title}`);
-                                                                                            
-                                                                                            console.log('--- Successful Creation Payload ---');
-                                                                                            // Log the original payload without images for clarity
-                                                                                            console.log(JSON.stringify(newProductPayload, null, 2));
-                                                                                            console.log('-----------------------------------');
-                                                                                        }
-                                                                                    } catch (e) {
-                                                                                        console.error(`--> Failed to sync product: "${product.title}" (ID: ${product.id}). Reason: ${e.message}`);
-                                                                                        if (newProductPayload) { 
-                                                                                            console.log('--- Failing Payload for Creation ---');
-                                                                                            console.log(JSON.stringify(newProductPayload, null, 2));
-                                                                                            console.log('------------------------------------');
-                                                                                            if (e.message.includes('422')) {
-                                                                                                console.log('--- Detailed 422 Error Analysis ---');
-                                                                                                console.log('Error suggests a mismatch between options and variants.');
-                                                                                                console.log('Product Options Sent:');
-                                                                                                console.log(JSON.stringify(newProductPayload.product.options, null, 2));
-                                                                                                console.log('Product Variants Sent:');
-                                                                                                console.log(JSON.stringify(newProductPayload.product.variants, null, 2));
-                                                                                                console.log('-----------------------------------');
-                                                                                            }
-                                                                                        }
-                                                                                        if (updatePayload) {
-                                                                                            console.log('--- Failing Payload for Update ---');
-                                                                                            console.log(JSON.stringify(updatePayload, null, 2));
-                                                                                            console.log('--------------------------------');
-                                                                                        }
-                                                                                    }
-                                                                                }                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ message: `Successfully synced ${productsToSync.length} products for ${vendor.name}.` }));
+                            } else {
+                                newProductPayload.product.options = [];
+                                newProductPayload.product.variants = [{
+                                    price: product.variants?.[0]?.price || '0',
+                                    inventory_management: 'shopify',
+                                    inventory_quantity: 0
+                                }];
+                            }
+                            
+                            // Create the product
+                            await postToShopify('/admin/api/2024-04/products.json', newProductPayload);
+                            res.write(`  -> Successfully created.\n\n`);
+                        }
+                    } catch (e) {
+                        res.write(`  -> FAILED to sync: ${e.message}\n\n`);
+                        // Log full details to server console for debugging
+                        console.error(`--> Failed to sync product: "${product.title}" (ID: ${product.id}). Reason: ${e.message}`);
+                        if (newProductPayload) { 
+                            console.log('--- Failing Payload for Creation ---');
+                            console.log(JSON.stringify(newProductPayload, null, 2));
+                        }
+                        if (updatePayload) {
+                            console.log('--- Failing Payload for Update ---');
+                            console.log(JSON.stringify(updatePayload, null, 2));
+                        }
+                    }
+                }
+                res.end(); // End the stream
 
             } catch (error) {
                 console.error('Error during selective sync:', error);
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ message: `Sync failed: ${error.message}` }));
+                res.write(`\n\nFATAL ERROR: ${error.message}`);
+                res.end(); // End the stream on fatal error
             }
         });
     }
