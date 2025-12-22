@@ -13,6 +13,44 @@ const { URL } = require('url');
 const { getCommissionPercentage, setCommissionPercentage, incrementProductViewCount, getAllProductViewCounts, createVendor, getVendors, getVendorById, trackFacebookEvent, getFacebookEvents, getTopFacebookEventsByProduct, getFacebookEventCounts, createCroscrowVendor, getCroscrowVendors, getCommissionOrders, saveCommissionOrder, getCroscrowVendorById, updateCroscrowVendor, getCroscrowSettings, setCroscrowSettings, saveManualOrder, getManualOrders } = require('./db');
 const sanitizeHtml = require('sanitize-html');
 
+function decodeHtmlEntities(text) {
+    if (typeof text !== 'string') {
+        return text;
+    }
+    return text.replace(/&lt;/g, '<')
+               .replace(/&gt;/g, '>')
+               .replace(/&quot;/g, '"')
+               .replace(/&apos;/g, "'")
+               .replace(/&#39;/g, "'")
+               .replace(/&amp;/g, '&');
+}
+
+function getCustomerNameFromOrder(order) {
+    if (!order) return 'N/A';
+    
+    let customerName = '';
+    if (order.customer) {
+        const name = `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim();
+        if (name) {
+            customerName = name;
+        }
+    }
+
+    if (!customerName && order.shipping_address && order.shipping_address.name) {
+        customerName = order.shipping_address.name;
+    }
+    
+    if (!customerName && order.billing_address && order.billing_address.name) {
+        customerName = order.billing_address.name;
+    }
+
+    if (!customerName && order.customer && order.customer.email) {
+        customerName = order.customer.email;
+    }
+    
+    return customerName || 'N/A';
+}
+
 const SHOP = process.env.SHOPIFY_SHOP_NAME;
 const ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
 const PORT = process.env.PORT || 3000;
@@ -368,6 +406,14 @@ async function fetchAllOrders(credentials) {
     return { orders };
 }
 
+async function getShopifyLocationId(credentials) {
+    const response = await fetchFromShopify('/admin/api/2024-04/locations.json', credentials);
+    if (response.locations && response.locations.length > 0) {
+        return response.locations[0].id;
+    }
+    throw new Error('No locations found for the store.');
+}
+
 
 
 function calculateTopSellingProducts(orders, productImages) {
@@ -457,6 +503,7 @@ function renderView(res, templatePath, data, commissionPercentage) {
                 const commission = (parseFloat(order.total_price) * (commissionPercentage / 100)).toFixed(2);
                 return `<tr>
                     <td>#${order.order_number}</td>
+                    <td>${getCustomerNameFromOrder(order)}</td>
                     <td>${new Date(order.created_at).toLocaleDateString()}</td>
                     <td>$${order.total_price}</td>
                     <td>$${commission}</td>
@@ -546,25 +593,25 @@ function renderView(res, templatePath, data, commissionPercentage) {
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                ${vendor.products.map(product => {
-                                                    const productForDataAttr = { ...product };
-                                                    delete productForDataAttr.body_html;
-                                                    return `
-                                                    <tr class="product-row" data-vendor-id="${vendor._id}" data-product='${JSON.stringify(productForDataAttr).replace(/'/g, "&apos;").replace(/"/g, "&quot;")}'>
-                                                        <td><input type="checkbox" class="product-checkbox" data-product-id="${product.id}"></td>
-                                                        <td><img src="${product.image ? product.image.src : ''}" alt="${product.title}" width="40"></td>
-                                                        <td>${product.title}</td>
-                                                        <td>${product.product_type}</td>
-                                                        <td>${product.variants.map(v => v.title).join(', ')}</td>
-                                                        <td>${product.variants.map(v => v.price).join(', ')}</td>
-                                                        <td>${product.variants.map(v => v.compare_at_price || 'N/A').join(', ')}</td>
-                                                    </tr>
-                                                `}).join('')}
-                                            </tbody>
+                                                                                                 ${vendor.products.map(product => {
+                                                                                                    const productForDataAttr = { ...product };
+                                                                                                    return `
+                                                                                                    <tr class="product-row" data-vendor-id="${vendor._id}" data-product='${JSON.stringify(productForDataAttr).replace(/'/g, "&apos;").replace(/"/g, "&quot;")}'>
+                                                                                                        <td><input type="checkbox" class="product-checkbox" data-product-id="${product.id}"></td>
+                                                                                                        <td><img src="${product.image ? product.image.src : ''}" alt="${product.title}" width="40"></td>
+                                                                                                        <td>${product.title}</td>
+                                                                                                        <td>${product.product_type}</td>
+                                                                                                        <td>${product.variants.map(v => v.title).join(', ')}</td>
+                                                                                                        <td>${product.variants.map(v => v.price).join(', ')}</td>
+                                                                                                        <td>${product.variants.map(v => v.compare_at_price || 'N/A').join(', ')}</td>
+                                                                                                    </tr>
+                                                                                                `}).join('')}                                            </tbody>
                                         </table>
                                         <div style="margin-top: 15px;">
-                                            <button class="button sync-selected-btn" data-vendor-id="${vendor._id}">Sync Selected</button>
-                                            <button class="button sync-all-btn" data-vendor-id="${vendor._id}">Sync All</button>
+                                            <button class="button sync-selected-btn" data-vendor-id="${vendor._id}" data-sync-type="full">Sync Selected</button>
+                                            <button class="button sync-all-btn" data-vendor-id="${vendor._id}" data-sync-type="full">Sync All</button>
+                                            <button class="button sync-inventory-btn" data-vendor-id="${vendor._id}" data-sync-type="inventory">Sync Inventory Only</button>
+                                            <button class="button sync-photos-btn" data-vendor-id="${vendor._id}" data-sync-type="photos">Sync Photos Only</button>
                                         </div>
                                         <div class="sync-status" data-vendor-id="${vendor._id}" style="margin-top: 15px; display: none;">
                                             <div class="loading-indicator"></div>
@@ -596,7 +643,7 @@ function renderView(res, templatePath, data, commissionPercentage) {
                                                     <tr class="order-summary-row" data-order-id="${order.id}">
                                                         <td>#${order.order_number}</td>
                                                         <td>${new Date(order.created_at).toLocaleDateString()}</td>
-                                                        <td>${order.customer ? `${order.customer.first_name} ${order.customer.last_name}` : 'N/A'}</td>
+                                                        <td>${getCustomerNameFromOrder(order)}</td>
                                                         <td>$${order.total_price}</td>
                                                         <td><button class="button toggle-details-btn" data-order-id="${order.id}">Details</button></td>
                                                     </tr>
@@ -605,7 +652,7 @@ function renderView(res, templatePath, data, commissionPercentage) {
                                                             <div style="display: flex; padding: 20px; background-color: #f9f9f9;">
                                                                 <div style="flex: 1;">
                                                                     <h4>Customer Details</h4>
-                                                                    <p><strong>Name:</strong> ${order.customer ? `${order.customer.first_name} ${order.customer.last_name}` : 'N/A'}</p>
+                                                                    <p><strong>Name:</strong> ${getCustomerNameFromOrder(order)}</p>
                                                                     <p><strong>Phone:</strong> ${order.customer && order.customer.phone ? order.customer.phone : 'N/A'}</p>
                                                                     <p><strong>Shipping Address:</strong> ${order.shipping_address ? `${order.shipping_address.address1}, ${order.shipping_address.city}, ${order.shipping_address.zip}, ${order.shipping_address.country}` : 'N/A'}</p>
                                                                 </div>
@@ -677,7 +724,7 @@ function renderView(res, templatePath, data, commissionPercentage) {
             const vendors = data.vendors || [];
             let ordersHtml;
             if (orders.length === 0) {
-                ordersHtml = '<tr><td colspan="9">No orders found.</td></tr>';
+                ordersHtml = '<tr><td colspan="11">No orders found.</td></tr>';
             } else {
                 ordersHtml = orders.map(order => {
                     const vendorOptions = vendors.map(vendor => {
@@ -685,19 +732,30 @@ function renderView(res, templatePath, data, commissionPercentage) {
                         return `<option value="${vendor._id}" ${isSelected ? 'selected' : ''}>${vendor.name}</option>`;
                     }).join('');
 
+                    const shopifyShipping = (order.shipping_lines || []).reduce((total, line) => total + parseFloat(line.price), 0);
+                    const shopifyDiscount = parseFloat(order.total_discounts || 0);
+
+                    const shippingValue = (order.manual_shipping !== undefined && order.manual_shipping !== null) ? order.manual_shipping : shopifyShipping.toFixed(2);
+                    const discountValue = (order.manual_discount !== undefined && order.manual_discount !== null) ? order.manual_discount : shopifyDiscount.toFixed(2);
+                    
+                    const tagsHtml = (order.tags || '').split(',').map(tag => tag.trim()).filter(tag => tag).map(tag => `<span class="tag">${tag}</span>`).join(' ');
+
+                    const rowClass = order.vendor_id ? 'order-saved' : 'order-unsaved';
+
                     return `
-                        <tr data-order-id="${order.id}">
+                        <tr data-order-id="${order.id}" class="${rowClass}">
                             <td>#${order.order_number}</td>
                             <td>${new Date(order.created_at).toLocaleDateString()}</td>
-                            <td>${order.customer ? `${order.customer.first_name} ${order.customer.last_name}` : 'N/A'}</td>
+                            <td>${getCustomerNameFromOrder(order)}</td>
                             <td>$${order.total_price}</td>
+                            <td>${tagsHtml}</td>
                             <td>
                                 <select class="vendor-select" data-order-id="${order.id}">
                                     <option value="">Assign Vendor</option>
                                     ${vendorOptions}
                                 </select>
                             </td>
-                            <td><input type="number" class="manual-shipping" placeholder="e.g., 49" value="${order.manual_shipping || ''}"></td>
+                            <td><input type="number" class="manual-shipping" placeholder="e.g., 49" value="${shippingValue}"></td>
                             <td>
                                 <select class="discount-type">
                                     <option value="">Select</option>
@@ -705,7 +763,7 @@ function renderView(res, templatePath, data, commissionPercentage) {
                                     <option value="vendor" ${order.discount_type === 'vendor' ? 'selected' : ''}>Vendor</option>
                                 </select>
                             </td>
-                            <td><input type="number" class="manual-discount" placeholder="e.g., 100" value="${order.manual_discount || ''}"></td>
+                            <td><input type="number" class="manual-discount" placeholder="e.g., 100" value="${discountValue}"></td>
                             <td><input type="number" class="amount-received" placeholder="e.g., 50" value="${order.amount_received || ''}"></td>
                             <td class="action-cell">
                                 <button class="button save-btn" data-order-id="${order.id}">Save</button>
@@ -776,7 +834,7 @@ function renderView(res, templatePath, data, commissionPercentage) {
                     <td><input type="checkbox" class="order-checkbox" data-order-id="${order.id}"></td>
                     <td>#${order.order_number}</td>
                     <td>${new Date(order.created_at).toLocaleDateString()}</td>
-                    <td>${order.customer ? `${order.customer.first_name} ${order.customer.last_name}` : 'N/A'}</td>
+                    <td>${getCustomerNameFromOrder(order)}</td>
                     <td>$${order.total_price}</td>
                     <td>${order.financial_status}</td>
                 </tr>
@@ -1301,10 +1359,52 @@ const server = http.createServer(async (req, res) => {
                 };
             });
 
+            let totalCommission = 0;
+            let totalShipping = 0;
+            let totalAmountCollected = 0;
+
+            for (const order of mergedOrders) {
+                // We can only calculate commission if a vendor is assigned and we have the order details
+                if (order.vendor_id) {
+                    totalShipping += parseFloat(order.manual_shipping || 0);
+                    totalAmountCollected += parseFloat(order.amount_received || 0);
+
+                    if (order.total_line_items_price) {
+                        const discount = parseFloat(order.manual_discount || 0);
+                        let commissionable_amount = parseFloat(order.total_line_items_price);
+
+                        if (order.discount_type === 'vendor') {
+                            commissionable_amount -= discount;
+                        }
+
+                        const base_commission = commissionable_amount * 0.20;
+                        const shipping = parseFloat(order.manual_shipping || 0);
+                        
+                        let subtotal = base_commission + shipping;
+                        if (order.discount_type === 'croscrow') {
+                            subtotal -= discount;
+                        }
+
+                        const gst = subtotal * 0.18;
+                        let singleOrderCommission = subtotal + gst;
+
+                        const amount_received = parseFloat(order.amount_received || 0);
+                        singleOrderCommission -= amount_received;
+                        
+                        totalCommission += singleOrderCommission;
+                    }
+                }
+            }
+
+            const currencyFormatter = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
+
             renderView(res, invoicesTemplatePath, {
                 orders: mergedOrders,
                 vendors,
-                manualOrders
+                manualOrders,
+                totalCommissionEarned: currencyFormatter.format(totalCommission),
+                totalShipping: currencyFormatter.format(totalShipping),
+                totalAmountCollected: currencyFormatter.format(totalAmountCollected)
             }, 0);
         } catch (error) {
             console.error('Error fetching invoices data:', error);
@@ -1800,7 +1900,7 @@ const server = http.createServer(async (req, res) => {
                                 product: {
                                     id: existingProductId,
                                     title: product.title,
-                                    body_html: "",
+                                    body_html: '',
                                     vendor: vendor.name,
                                     product_type: product.product_type,
                                     tags: product.tags,
@@ -1852,7 +1952,7 @@ const server = http.createServer(async (req, res) => {
                             newProductPayload = {
                                 product: {
                                     title: product.title,
-                                    body_html: "",
+                                    body_html: '',
                                     vendor: vendor.name,
                                     status: product.status || 'active',
                                     images: product.images || []
@@ -1924,7 +2024,171 @@ const server = http.createServer(async (req, res) => {
         });
     }
 
+    // --- Handle Inventory Sync for a Vendor ---
+    else if (req.url === '/vendors/sync-inventory' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', async () => {
+            res.writeHead(200, { 'Content-Type': 'text/plain', 'Transfer-Encoding': 'chunked' });
+            
+            try {
+                const { products: productsToSync, vendorId } = JSON.parse(body);
+                const vendor = await getVendorById(vendorId);
 
+                if (!vendor) {
+                    throw new Error('Vendor not found for syncing.');
+                }
+                
+                res.write(`Starting inventory sync for ${vendor.name}...\n`);
+
+                // 1. Fetch all products from the main store to check for existing ones
+                res.write('Fetching existing products from your store...\n');
+                const mainStoreProducts = await fetchAllProducts();
+                const mainStoreProductMap = mainStoreProducts.products.reduce((map, product) => {
+                    map[product.title] = product; // Store the full product object
+                    return map;
+                }, {});
+                res.write(`Found ${mainStoreProducts.products.length} existing products.\n\n`);
+
+                // Get location ID
+                const locationId = await getShopifyLocationId();
+
+                // 2. Loop and update inventory for each product on the main store
+                for (const product of productsToSync) {
+                    res.write(`Syncing inventory for: ${product.title}...\n`);
+                    
+                    try {
+                        const existingProduct = mainStoreProductMap[product.title];
+
+                        if (existingProduct) {
+                            res.write(`  -> Found existing product. Updating inventory and variants...\n`);
+                            
+                            const existingVariants = existingProduct.variants;
+                            const existingVariantMap = existingVariants.reduce((map, variant) => {
+                                if (variant.sku) map[variant.sku] = variant;
+                                return map;
+                            }, {});
+
+                            for (const v of product.variants) {
+                                const existingVariant = v.sku ? existingVariantMap[v.sku] : null;
+                                if (existingVariant) {
+                                    // Update existing variant
+                                    const inventoryPayload = {
+                                        location_id: locationId,
+                                        inventory_item_id: existingVariant.inventory_item_id,
+                                        available: Math.max(0, Number(v.inventory_quantity || 0)),
+                                    };
+                                    await postToShopify(`/admin/api/2024-04/inventory_levels/set.json`, inventoryPayload);
+                                    res.write(`  -> Successfully synced inventory for variant with SKU: ${v.sku}.\n\n`);
+                                } else {
+                                    // Create new variant
+                                    const newVariantPayload = {
+                                        variant: {
+                                            price: String(v.price || "0"),
+                                            option1: v.option1,
+                                            option2: v.option2,
+                                            option3: v.option3,
+                                            sku: v.sku,
+                                            inventory_management: "shopify",
+                                        }
+                                    };
+                                    if (v.compare_at_price) newVariantPayload.variant.compare_at_price = String(v.compare_at_price);
+                                    
+                                    const createdVariantResponse = await postToShopify(`/admin/api/2024-04/products/${existingProduct.id}/variants.json`, newVariantPayload);
+                                    
+                                    const inventoryPayload = {
+                                        location_id: locationId,
+                                        inventory_item_id: createdVariantResponse.variant.inventory_item_id,
+                                        available: Math.max(0, Number(v.inventory_quantity || 0)),
+                                    };
+                                    await postToShopify(`/admin/api/2024-04/inventory_levels/set.json`, inventoryPayload);
+
+                                    res.write(`  -> Successfully created and synced inventory for new variant with SKU: ${v.sku}.\n\n`);
+                                }
+                            }
+                        } else {
+                            res.write(`  -> Product not found in your store. Skipping inventory sync.\n\n`);
+                        }
+                    } catch (e) {
+                        res.write(`  -> FAILED to sync inventory: ${e.message}\n\n`);
+                        console.error(`--> Failed to sync inventory for product: "${product.title}" (ID: ${product.id}). Reason: ${e.message}`);
+                    }
+                }
+                res.end(); // End the stream
+
+            } catch (error) {
+                console.error('Error during inventory sync:', error);
+                res.write(`\n\nFATAL ERROR: ${error.message}`);
+                res.end(); // End the stream on fatal error
+            }
+        });
+    }
+
+    // --- Handle Photo Sync for a Vendor ---
+    else if (req.url === '/vendors/sync-photos' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', async () => {
+            res.writeHead(200, { 'Content-Type': 'text/plain', 'Transfer-Encoding': 'chunked' });
+            
+            try {
+                const { products: productsToSync, vendorId } = JSON.parse(body);
+                const vendor = await getVendorById(vendorId);
+
+                if (!vendor) {
+                    throw new Error('Vendor not found for syncing.');
+                }
+                
+                res.write(`Starting photo sync for ${vendor.name}...\n`);
+
+                // 1. Fetch all products from the main store to check for existing ones
+                res.write('Fetching existing products from your store...\n');
+                const mainStoreProducts = await fetchAllProducts();
+                const mainStoreProductMap = mainStoreProducts.products.reduce((map, product) => {
+                    map[product.title] = product.id; // Use title as the key
+                    return map;
+                }, {});
+                res.write(`Found ${mainStoreProducts.products.length} existing products.\n\n`);
+
+                // 2. Loop and update images for each product on the main store
+                for (const product of productsToSync) {
+                    res.write(`Syncing photos for: ${product.title}...\n`);
+                    
+                    try {
+                        const existingProductId = mainStoreProductMap[product.title];
+
+                        if (existingProductId) {
+                            if (product.images && product.images.length > 0) {
+                                res.write(`  -> Found existing product. Updating photos...\n`);
+                                
+                                const updatePayload = {
+                                    product: {
+                                        id: existingProductId,
+                                        images: product.images || []
+                                    }
+                                };
+                                await putToShopify(`/admin/api/2024-04/products/${existingProductId}.json`, updatePayload);
+                                res.write(`  -> Successfully updated photos.\n\n`);
+                            } else {
+                                res.write(`  -> No images to sync for this product. Skipping.\n\n`);
+                            }
+                        } else {
+                            res.write(`  -> Product not found in your store. Skipping photo sync.\n\n`);
+                        }
+                    } catch (e) {
+                        res.write(`  -> FAILED to sync photos: ${e.message}\n\n`);
+                        console.error(`--> Failed to sync photos for product: "${product.title}" (ID: ${product.id}). Reason: ${e.message}`);
+                    }
+                }
+                res.end(); // End the stream
+
+            } catch (error) {
+                console.error('Error during photo sync:', error);
+                res.write(`\n\nFATAL ERROR: ${error.message}`);
+                res.end(); // End the stream on fatal error
+            }
+        });
+    }
 
     // --- Handle GET request for the Facebook Events page ---
     else if (req.url.startsWith('/facebook-events') && req.method === 'GET') {

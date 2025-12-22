@@ -1,7 +1,19 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // --- Helper function to decode HTML entities ---
+    function decodeHtml(html) {
+        if (!html || typeof html !== 'string') {
+            return '';
+        }
+        var txt = document.createElement("textarea");
+        txt.innerHTML = html;
+        return txt.value;
+    }
+
     // --- Helper function to perform the sync POST request ---
-    async function syncProducts(vendorId, products, button) {
+    async function sync(vendorId, products, button) {
         const originalText = button.textContent;
+        const syncType = button.dataset.syncType;
+
         button.textContent = 'Syncing...';
         button.disabled = true;
 
@@ -11,13 +23,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
         statusContainer.style.display = 'block';
         logsContainer.textContent = '';
-        loadingIndicator.style.display = 'block'; // Assuming CSS for loading indicator exists
+        loadingIndicator.style.display = 'block';
+
+        const productsToSync = products.map(p => ({
+            ...p,
+            body_html: decodeHtml(p.body_html)
+        }));
+
+        let endpoint = '/vendors/sync-products';
+        if (syncType === 'inventory') {
+            endpoint = '/vendors/sync-inventory';
+        } else if (syncType === 'photos') {
+            endpoint = '/vendors/sync-photos';
+        } else if (syncType === 'full') {
+            endpoint = '/vendors/sync-products';
+        }
 
         try {
-            const response = await fetch('/vendors/sync-products', {
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ vendorId, products })
+                body: JSON.stringify({ vendorId, products: productsToSync })
             });
 
             if (!response.ok) {
@@ -50,7 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 button.textContent = originalText;
                 button.disabled = false;
                 statusContainer.style.display = 'none';
-            }, 5000); // Keep logs visible for 5 seconds
+            }, 5000);
         }
     }
 
@@ -65,41 +91,34 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // --- Event listener for "Sync Selected" buttons ---
-    document.querySelectorAll('.sync-selected-btn').forEach(button => {
+    // --- Generic Event listener for all sync buttons ---
+    document.querySelectorAll('.sync-selected-btn, .sync-all-btn, .sync-inventory-btn, .sync-photos-btn').forEach(button => {
         button.addEventListener('click', async (event) => {
-            const vendorId = event.target.dataset.vendorId;
-            const selectedRows = document.querySelectorAll(`.product-row[data-vendor-id="${vendorId}"] .product-checkbox:checked`);
-            
-            if (selectedRows.length === 0) {
-                alert('Please select at least one product to sync.');
-                return;
+            const button = event.target;
+            const vendorId = button.dataset.vendorId;
+            let products = [];
+
+            if (button.classList.contains('sync-all-btn')) {
+                const allProductRows = document.querySelectorAll(`.product-row[data-vendor-id="${vendorId}"]`);
+                if (allProductRows.length === 0) {
+                    alert('No products found for this vendor.');
+                    return;
+                }
+                products = Array.from(allProductRows).map(row => {
+                    return JSON.parse(row.dataset.product);
+                });
+            } else {
+                const selectedRows = document.querySelectorAll(`.product-row[data-vendor-id="${vendorId}"] .product-checkbox:checked`);
+                if (selectedRows.length === 0) {
+                    alert('Please select at least one product to sync.');
+                    return;
+                }
+                products = Array.from(selectedRows).map(row => {
+                    return JSON.parse(row.closest('.product-row').dataset.product);
+                });
             }
 
-            const selectedProducts = Array.from(selectedRows).map(row => {
-                return JSON.parse(row.closest('.product-row').dataset.product);
-            });
-
-            await syncProducts(vendorId, selectedProducts, button);
-        });
-    });
-
-    // --- Event listener for "Sync All" buttons ---
-    document.querySelectorAll('.sync-all-btn').forEach(button => {
-        button.addEventListener('click', async (event) => {
-            const vendorId = event.target.dataset.vendorId;
-            const allProductRows = document.querySelectorAll(`.product-row[data-vendor-id="${vendorId}"]`);
-            
-            if (allProductRows.length === 0) {
-                alert('No products found for this vendor.');
-                return;
-            }
-
-            const allProducts = Array.from(allProductRows).map(row => {
-                return JSON.parse(row.dataset.product);
-            });
-
-            await syncProducts(vendorId, allProducts, button);
+            await sync(vendorId, products, button);
         });
     });
 
@@ -116,8 +135,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!response.ok) {
                     throw new Error('Failed to fetch products.');
                 }
-                // Reload the page to show the fetched products in the other tab.
-                // A more advanced implementation could update the DOM without a full reload.
                 window.location.reload();
             } catch (error) {
                 console.error('Fetch failed:', error);

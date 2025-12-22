@@ -22,6 +22,17 @@
         button, .button { background-color: #2ea44f; color: white; border: none; padding: 10px 15px; border-radius: 6px; font-size: 1rem; cursor: pointer; text-decoration: none; display: inline-block; text-align: center; }
         button:hover, .button:hover { background-color: #2c974b; }
         .action-cell { display: flex; gap: 10px; }
+        .tag {
+            display: inline-block;
+            background-color: #eee;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            margin-right: 4px;
+            color: #333;
+        }
+        .order-saved { background-color: #e6ffed; }
+        .order-unsaved { background-color: #fffbdd; }
     </style>
 </head>
 <body>
@@ -32,6 +43,24 @@
 
     <div class="main-content">
         <h1>Invoices</h1>
+
+        <div class="card">
+            <h2>Commission Stats</h2>
+            <div style="display: flex; gap: 20px;">
+                <div>
+                    <h4>Total Commission Earned</h4>
+                    <p style="font-size: 24px; margin: 0;">{{totalCommissionEarned}}</p>
+                </div>
+                <div>
+                    <h4>Total Shipping</h4>
+                    <p style="font-size: 24px; margin: 0;">{{totalShipping}}</p>
+                </div>
+                <div>
+                    <h4>Total Amount Collected</h4>
+                    <p style="font-size: 24px; margin: 0;">{{totalAmountCollected}}</p>
+                </div>
+            </div>
+        </div>
 
         <div class="card">
             <h2>Manual Invoice Generation</h2>
@@ -131,6 +160,7 @@
                         <th>Date</th>
                         <th>Customer</th>
                         <th>Total</th>
+                        <th>Tags</th>
                         <th>Assign Vendor</th>
                         <th>Shipping</th>
                         <th>Discount Type</th>
