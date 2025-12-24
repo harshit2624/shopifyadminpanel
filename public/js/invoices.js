@@ -29,13 +29,56 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
             if (result.success) {
                 alert('Saved successfully!');
-                // Optionally, you can provide some visual feedback here
-                event.target.style.backgroundColor = '#2c974b';
-                setTimeout(() => {
-                    event.target.style.backgroundColor = '#2ea44f';
-                }, 2000);
+                row.classList.remove('order-unsaved');
+                row.classList.add('order-saved');
             } else {
                 alert('Error saving data: ' + result.error);
+            }
+        });
+    });
+
+    const cancelButtons = document.querySelectorAll('.cancel-btn');
+    cancelButtons.forEach(button => {
+        button.addEventListener('click', async (event) => {
+            const row = event.target.closest('tr');
+            const orderId = row.dataset.orderId;
+
+            const response = await fetch('/invoices/mark-as-canceled', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order_id: orderId })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                alert('Order marked as canceled.');
+                row.className = 'order-canceled';
+                row.querySelectorAll('button').forEach(btn => btn.disabled = true);
+            } else {
+                alert('Error: ' + result.error);
+            }
+        });
+    });
+
+    const settleButtons = document.querySelectorAll('.settle-btn');
+    settleButtons.forEach(button => {
+        button.addEventListener('click', async (event) => {
+            const row = event.target.closest('tr');
+            const orderId = row.dataset.orderId;
+
+            const response = await fetch('/invoices/mark-as-settled', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order_id: orderId })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                alert('Order marked as settled.');
+                row.className = 'order-settled';
+                row.querySelectorAll('button').forEach(btn => btn.disabled = true);
+            } else {
+                alert('Error: ' + result.error);
             }
         });
     });

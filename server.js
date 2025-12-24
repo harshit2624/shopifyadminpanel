@@ -10,7 +10,7 @@ const path = require('path');
 const querystring = require('querystring');
 const { URL } = require('url');
 
-const { getCommissionPercentage, setCommissionPercentage, incrementProductViewCount, getAllProductViewCounts, createVendor, getVendors, getVendorById, trackFacebookEvent, getFacebookEvents, getTopFacebookEventsByProduct, getFacebookEventCounts, createCroscrowVendor, getCroscrowVendors, getCommissionOrders, saveCommissionOrder, getCroscrowVendorById, updateCroscrowVendor, getCroscrowSettings, setCroscrowSettings, saveManualOrder, getManualOrders } = require('./db');
+const { getCommissionPercentage, setCommissionPercentage, incrementProductViewCount, getAllProductViewCounts, createVendor, getVendors, getVendorById, trackFacebookEvent, getFacebookEvents, getTopFacebookEventsByProduct, getFacebookEventCounts, createCroscrowVendor, getCroscrowVendors, getCommissionOrders, saveCommissionOrder, getCroscrowVendorById, updateCroscrowVendor, getCroscrowSettings, setCroscrowSettings, saveManualOrder, getManualOrders, updateCommissionOrderStatus } = require('./db');
 const sanitizeHtml = require('sanitize-html');
 
 function decodeHtmlEntities(text) {
@@ -741,7 +741,14 @@ function renderView(res, templatePath, data, commissionPercentage) {
                     
                     const tagsHtml = (order.tags || '').split(',').map(tag => tag.trim()).filter(tag => tag).map(tag => `<span class="tag">${tag}</span>`).join(' ');
 
-                    const rowClass = order.vendor_id ? 'order-saved' : 'order-unsaved';
+                    let rowClass = 'order-unsaved';
+                    if (order.status === 'canceled') {
+                        rowClass = 'order-canceled';
+                    } else if (order.status === 'settled') {
+                        rowClass = 'order-settled';
+                    } else if (order.vendor_id) {
+                        rowClass = 'order-saved';
+                    }
                     
                     const productImage = productImages[order.line_items[0].product_id] || '';
 
@@ -772,6 +779,8 @@ function renderView(res, templatePath, data, commissionPercentage) {
                             <td class="action-cell">
                                 <button class="button save-btn" data-order-id="${order.id}">Save</button>
                                 <a href="/invoices/generate?order_id=${order.id}" class="button" target="_blank">Invoice</a>
+                                <button class="button cancel-btn" data-order-id="${order.id}">Cancel</button>
+                                <button class="button settle-btn" data-order-id="${order.id}">Settle</button>
                             </td>
                         </tr>
                     `;
@@ -1699,6 +1708,36 @@ const server = http.createServer(async (req, res) => {
                     success: false,
                     error: 'Failed to assign vendor.'
                 }));
+            }
+        });
+    } else if (req.url === '/invoices/mark-as-canceled' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', async () => {
+            try {
+                const postData = JSON.parse(body);
+                await updateCommissionOrderStatus(postData.order_id, 'canceled');
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+                console.error('Error marking order as canceled:', error);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: 'Failed to mark as canceled.' }));
+            }
+        });
+    } else if (req.url === '/invoices/mark-as-settled' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => body += chunk.toString());
+        req.on('end', async () => {
+            try {
+                const postData = JSON.parse(body);
+                await updateCommissionOrderStatus(postData.order_id, 'settled');
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true }));
+            } catch (error) {
+                console.error('Error marking order as settled:', error);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: false, error: 'Failed to mark as settled.' }));
             }
         });
     } else if (req.url === '/invoices/generate-manual' && req.method === 'POST') {

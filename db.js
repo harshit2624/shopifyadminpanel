@@ -488,11 +488,32 @@ async function saveCommissionOrder(order) {
             throw new Error('Database not connected');
         }
         const collection = db.collection('commission_orders');
+        
+        const orderToSave = {
+            ...order,
+            status: order.status || 'saved' // Default to 'saved'
+        };
+
         // Use order_id which is the shopify order id
-        const result = await collection.updateOne({ order_id: order.order_id }, { $set: order }, { upsert: true });
+        const result = await collection.updateOne({ order_id: order.order_id }, { $set: orderToSave }, { upsert: true });
         return result;
     } catch (error) {
         console.error('Error saving commission order:', error);
+        throw error;
+    }
+}
+
+async function updateCommissionOrderStatus(orderId, status) {
+    try {
+        const db = await connectToDatabase();
+        if (!db) {
+            throw new Error('Database not connected');
+        }
+        const collection = db.collection('commission_orders');
+        const result = await collection.updateOne({ order_id: orderId }, { $set: { status: status } });
+        return result;
+    } catch (error) {
+        console.error('Error updating commission order status:', error);
         throw error;
     }
 }
@@ -579,6 +600,7 @@ module.exports = {
     getCroscrowVendors,
     getCroscrowVendorById,
     updateCroscrowVendor,
+    updateCommissionOrderStatus,
     getCommissionOrders,
     saveCommissionOrder,
     getCroscrowSettings,
