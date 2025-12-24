@@ -722,9 +722,10 @@ function renderView(res, templatePath, data, commissionPercentage) {
         if (templatePath.endsWith('invoices.html')) {
             const orders = data.orders || [];
             const vendors = data.vendors || [];
+            const productImages = data.productImages || {};
             let ordersHtml;
             if (orders.length === 0) {
-                ordersHtml = '<tr><td colspan="11">No orders found.</td></tr>';
+                ordersHtml = '<tr><td colspan="12">No orders found.</td></tr>';
             } else {
                 ordersHtml = orders.map(order => {
                     const vendorOptions = vendors.map(vendor => {
@@ -741,9 +742,12 @@ function renderView(res, templatePath, data, commissionPercentage) {
                     const tagsHtml = (order.tags || '').split(',').map(tag => tag.trim()).filter(tag => tag).map(tag => `<span class="tag">${tag}</span>`).join(' ');
 
                     const rowClass = order.vendor_id ? 'order-saved' : 'order-unsaved';
+                    
+                    const productImage = productImages[order.line_items[0].product_id] || '';
 
                     return `
                         <tr data-order-id="${order.id}" class="${rowClass}">
+                            <td><img src="${productImage}" alt="${order.line_items[0].title}" width="50" style="border-radius: 4px;"></td>
                             <td>#${order.order_number}</td>
                             <td>${new Date(order.created_at).toLocaleDateString()}</td>
                             <td>${getCustomerNameFromOrder(order)}</td>
@@ -1339,12 +1343,18 @@ const server = http.createServer(async (req, res) => {
     else if (req.url === '/invoices' && req.method === 'GET') {
         const invoicesTemplatePath = path.join(__dirname, 'views', 'invoices.html');
         try {
-            const [orderData, vendors, commissionOrders, manualOrders] = await Promise.all([
+            const [orderData, vendors, commissionOrders, manualOrders, productData] = await Promise.all([
                 fetchAllOrders(),
                 getCroscrowVendors(),
                 getCommissionOrders(),
-                getManualOrders()
+                getManualOrders(),
+                fetchAllProducts()
             ]);
+
+            const productImages = productData.products.reduce((map, product) => {
+                map[product.id] = product.image ? product.image.src : '';
+                return map;
+            }, {});
 
             const commissionOrdersMap = commissionOrders.reduce((map, order) => {
                 map[order.order_id] = order;
@@ -1359,9 +1369,13 @@ const server = http.createServer(async (req, res) => {
                 };
             });
 
-            let totalCommission = 0;
+            let settlementPending = 0;
+            let totalCommissionEarned = 0;
             let totalShipping = 0;
             let totalAmountCollected = 0;
+            let totalGstOnCommission = 0;
+            let totalDiscountByVendors = 0;
+            let totalDiscountByCroscrow = 0;
 
             for (const order of mergedOrders) {
                 // We can only calculate commission if a vendor is assigned and we have the order details
@@ -1375,6 +1389,9 @@ const server = http.createServer(async (req, res) => {
 
                         if (order.discount_type === 'vendor') {
                             commissionable_amount -= discount;
+                            totalDiscountByVendors += discount;
+                        } else if (order.discount_type === 'croscrow') {
+                            totalDiscountByCroscrow += discount;
                         }
 
                         const base_commission = commissionable_amount * 0.20;
@@ -1385,13 +1402,16 @@ const server = http.createServer(async (req, res) => {
                             subtotal -= discount;
                         }
 
+                        totalCommissionEarned += subtotal;
+
                         const gst = subtotal * 0.18;
+                        totalGstOnCommission += gst;
                         let singleOrderCommission = subtotal + gst;
 
                         const amount_received = parseFloat(order.amount_received || 0);
                         singleOrderCommission -= amount_received;
                         
-                        totalCommission += singleOrderCommission;
+                        settlementPending += singleOrderCommission;
                     }
                 }
             }
@@ -1402,9 +1422,14 @@ const server = http.createServer(async (req, res) => {
                 orders: mergedOrders,
                 vendors,
                 manualOrders,
-                totalCommissionEarned: currencyFormatter.format(totalCommission),
+                productImages,
+                settlementPending: currencyFormatter.format(settlementPending),
+                totalCommissionEarned: currencyFormatter.format(totalCommissionEarned),
                 totalShipping: currencyFormatter.format(totalShipping),
-                totalAmountCollected: currencyFormatter.format(totalAmountCollected)
+                totalAmountCollected: currencyFormatter.format(totalAmountCollected),
+                totalGstOnCommission: currencyFormatter.format(totalGstOnCommission),
+                totalDiscountByVendors: currencyFormatter.format(totalDiscountByVendors),
+                totalDiscountByCroscrow: currencyFormatter.format(totalDiscountByCroscrow)
             }, 0);
         } catch (error) {
             console.error('Error fetching invoices data:', error);

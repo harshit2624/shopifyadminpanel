@@ -48,6 +48,10 @@
             <h2>Commission Stats</h2>
             <div style="display: flex; gap: 20px;">
                 <div>
+                    <h4>Settlement Pending</h4>
+                    <p style="font-size: 24px; margin: 0;">{{settlementPending}}</p>
+                </div>
+                <div>
                     <h4>Total Commission Earned</h4>
                     <p style="font-size: 24px; margin: 0;">{{totalCommissionEarned}}</p>
                 </div>
@@ -58,6 +62,18 @@
                 <div>
                     <h4>Total Amount Collected</h4>
                     <p style="font-size: 24px; margin: 0;">{{totalAmountCollected}}</p>
+                </div>
+                <div>
+                    <h4>Total GST on Commission</h4>
+                    <p style="font-size: 24px; margin: 0;">{{totalGstOnCommission}}</p>
+                </div>
+                <div>
+                    <h4>Total Discount by Vendors</h4>
+                    <p style="font-size: 24px; margin: 0;">{{totalDiscountByVendors}}</p>
+                </div>
+                <div>
+                    <h4>Total Discount by Croscrow</h4>
+                    <p style="font-size: 24px; margin: 0;">{{totalDiscountByCroscrow}}</p>
                 </div>
             </div>
         </div>
@@ -156,6 +172,7 @@
             <table>
                 <thead>
                     <tr>
+                        <th>Item</th>
                         <th>Order</th>
                         <th>Date</th>
                         <th>Customer</th>
