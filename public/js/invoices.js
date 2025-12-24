@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
             if (result.success) {
                 alert('Manual invoice saved successfully!');
-                form.reset();
+                location.reload();
             } else {
                 alert('Error saving manual invoice: ' + result.error);
             }

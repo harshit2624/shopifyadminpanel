@@ -45,6 +45,36 @@
         <h1>Invoices</h1>
 
         <div class="card">
+            <h2>Filter by Date</h2>
+            <form action="/invoices" method="GET">
+                <div style="display: flex; gap: 20px; align-items: center;">
+                    <div>
+                        <label for="date_range">Date Range</label>
+                        <select name="date_range" id="date_range" onchange="this.form.submit()">
+                            <option value="all" {{selected_date_range_all}}>All Time</option>
+                            <option value="today" {{selected_date_range_today}}>Today</option>
+                            <option value="yesterday" {{selected_date_range_yesterday}}>Yesterday</option>
+                            <option value="last_7_days" {{selected_date_range_last_7_days}}>Last 7 Days</option>
+                            <option value="month_to_date" {{selected_date_range_month_to_date}}>Month to Date</option>
+                            <option value="custom" {{selected_date_range_custom}}>Custom Range</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="start_date">Start Date</label>
+                        <input type="date" name="start_date" id="start_date" value="{{start_date}}">
+                    </div>
+                    <div>
+                        <label for="end_date">End Date</label>
+                        <input type="date" name="end_date" id="end_date" value="{{end_date}}">
+                    </div>
+                    <div>
+                        <button type="submit">Filter</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <div class="card">
             <h2>Commission Stats</h2>
             <div style="display: flex; gap: 20px;">
                 <div>
@@ -148,18 +178,12 @@
                     <tr>
                         <td>{{manual_order_id}}</td>
                         <td>${{manual_amount}}</td>
-                        <td>
-                            {{#each ../vendors}}
-                                {{#if (eq ../manual_vendor_id (string _id))}}
-                                    {{name}}
-                                {{/if}}
-                            {{/each}}
-                        </td>
+                        <td>{{vendor_name}}</td>
                         <td>${{manual_shipping}}</td>
                         <td>${{manual_discount}}</td>
                         <td>${{amount_received}}</td>
                         <td>
-                            <a href="/invoices/generate-manual?manual_order_id={{manual_order_id}}" class="button" target="_blank">Generate Invoice</a>
+                            <a href="/invoices/generate-from-manual?manual_order_id={{manual_order_id}}" class="button" target="_blank">Generate Invoice</a>
                         </td>
                     </tr>
                     {{/each}}

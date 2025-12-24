@@ -1338,11 +1338,177 @@ const server = http.createServer(async (req, res) => {
                 res.end('Failed to save croscrow settings.');
             }
         });
+    } else if (req.url.includes('/invoices/generate-from-manual') && req.method === 'GET') {
+        const invoiceTemplatePath = path.join(__dirname, 'views', 'invoice-template.html');
+        try {
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const manualOrderId = url.searchParams.get('manual_order_id');
+            const manualOrders = await getManualOrders();
+            const manualOrder = manualOrders.find(o => o.manual_order_id === manualOrderId);
+
+            if (!manualOrder) {
+                throw new Error('Manual order not found.');
+            }
+
+            const vendor = await getCroscrowVendorById(manualOrder.manual_vendor_id);
+            if (!vendor) {
+                throw new Error('Vendor not found for this manual order.');
+            }
+
+            const mockOrder = {
+                order_number: manualOrder.manual_order_id,
+                created_at: manualOrder.createdAt,
+                total_line_items_price: manualOrder.manual_amount,
+                customer: { first_name: 'Manual', last_name: 'Entry' },
+                shipping_address: { address1: '', city: '', zip: '', country: '' },
+                line_items: [{ title: 'Manual Item', quantity: 1, price: manualOrder.manual_amount }]
+            };
+
+            const croscrowSettings = await getCroscrowSettings();
+            const currencyFormatter = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
+
+            const discount = parseFloat(manualOrder.manual_discount || 0);
+            let commissionable_amount = parseFloat(manualOrder.manual_amount);
+
+            if (manualOrder.discount_type === 'vendor') {
+                commissionable_amount -= discount;
+            }
+
+            const base_commission = commissionable_amount * 0.20;
+            const shipping = parseFloat(manualOrder.manual_shipping || 0);
+            
+            let subtotal = base_commission + shipping;
+            if (manualOrder.discount_type === 'croscrow') {
+                subtotal -= discount;
+            }
+
+            const gst = subtotal * 0.18;
+            let total_commission = subtotal + gst;
+
+            const amount_received = parseFloat(manualOrder.amount_received || 0);
+            total_commission -= amount_received;
+
+            const invoiceData = {
+                order: mockOrder,
+                vendor: vendor,
+                commissionOrder: manualOrder,
+                croscrowSettings,
+                invoice_date: new Date().toLocaleDateString('en-CA'),
+                order_date: new Date(manualOrder.createdAt).toLocaleDateString('en-CA'),
+                commissionable_amount_formatted: currencyFormatter.format(commissionable_amount),
+                base_commission_formatted: currencyFormatter.format(base_commission),
+                shipping_formatted: currencyFormatter.format(shipping),
+                discount_formatted: currencyFormatter.format(discount),
+                subtotal_formatted: currencyFormatter.format(subtotal),
+                gst_formatted: currencyFormatter.format(gst),
+                amount_received_formatted: currencyFormatter.format(amount_received),
+                total_commission_formatted: currencyFormatter.format(total_commission),
+            };
+
+            renderView(res, invoiceTemplatePath, invoiceData, 0);
+
+        } catch (error) {
+            console.error('Error generating invoice from manual order:', error);
+            renderView(res, path.join(__dirname, 'views', 'invoice-template.html'), {
+                error: `Could not generate invoice: ${error.message}`
+            }, 0);
+        }
+    } else if (req.url.startsWith('/invoices/generate') && req.method === 'GET') {
+        const invoiceTemplatePath = path.join(__dirname, 'views', 'invoice-template.html');
+        try {
+            console.log("--- Generating Invoice ---");
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const orderId = url.searchParams.get('order_id');
+            console.log("Order ID:", orderId);
+
+            const [orderData, commissionOrders, croscrowSettings] = await Promise.all([
+                fetchFromShopify(`/admin/api/2024-04/orders/${orderId}.json`),
+                getCommissionOrders(),
+                getCroscrowSettings()
+            ]);
+
+            console.log("Fetched", commissionOrders.length, "commission orders.");
+
+            const order = orderData.order;
+            if (!order) {
+                throw new Error('Order not found.');
+            }
+
+            const commissionOrder = commissionOrders.find(co => co.order_id == String(order.id));
+            console.log("Found commission order:", commissionOrder);
+
+            if (!commissionOrder) {
+                throw new Error('Commission data not found for this order. Please save vendor and other details first.');
+            }
+
+            const vendor = await getCroscrowVendorById(commissionOrder.vendor_id);
+            console.log("Found vendor:", vendor);
+
+            if (!vendor) {
+                throw new Error('Vendor not found for this order.');
+            }
+
+            // --- Calculation Logic ---
+            const currencyFormatter = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
+
+            const discount = parseFloat(commissionOrder.manual_discount || 0);
+            let commissionable_amount = parseFloat(order.total_line_items_price);
+
+            if (commissionOrder.discount_type === 'vendor') {
+                commissionable_amount -= discount;
+            }
+
+            const base_commission = commissionable_amount * 0.20;
+
+            const shipping = parseFloat(commissionOrder.manual_shipping || 0);
+            
+            let subtotal = base_commission + shipping;
+            if (commissionOrder.discount_type === 'croscrow') {
+                subtotal -= discount;
+            }
+
+            const gst = subtotal * 0.18;
+            let total_commission = subtotal + gst;
+
+            const amount_received = parseFloat(commissionOrder.amount_received || 0);
+            total_commission -= amount_received;
+
+            const invoiceData = {
+                order,
+                vendor,
+                commissionOrder,
+                croscrowSettings,
+                invoice_date: new Date().toLocaleDateString('en-CA'),
+                order_date: new Date(order.created_at).toLocaleDateString('en-CA'),
+
+                commissionable_amount_formatted: currencyFormatter.format(commissionable_amount),
+                base_commission_formatted: currencyFormatter.format(base_commission),
+                shipping_formatted: currencyFormatter.format(shipping),
+                discount_formatted: currencyFormatter.format(discount),
+                subtotal_formatted: currencyFormatter.format(subtotal),
+                gst_formatted: currencyFormatter.format(gst),
+                amount_received_formatted: currencyFormatter.format(amount_received),
+                total_commission_formatted: currencyFormatter.format(total_commission),
+            };
+
+            renderView(res, invoiceTemplatePath, invoiceData, 0);
+
+        } catch (error) {
+            console.error('Error generating invoice:', error);
+            renderView(res, path.join(__dirname, 'views', 'invoice-template.html'), {
+                error: `Could not generate invoice: ${error.message}`
+            }, 0);
+        }
     }
     // --- Handle GET and POST for Invoices page ---
-    else if (req.url === '/invoices' && req.method === 'GET') {
+    else if (req.url.startsWith('/invoices') && req.method === 'GET') {
         const invoicesTemplatePath = path.join(__dirname, 'views', 'invoices.html');
         try {
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            const dateRange = url.searchParams.get('date_range') || 'all';
+            const startDateParam = url.searchParams.get('start_date');
+            const endDateParam = url.searchParams.get('end_date');
+
             const [orderData, vendors, commissionOrders, manualOrders, productData] = await Promise.all([
                 fetchAllOrders(),
                 getCroscrowVendors(),
@@ -1361,13 +1527,65 @@ const server = http.createServer(async (req, res) => {
                 return map;
             }, {});
 
-            const mergedOrders = orderData.orders.map(order => {
+            let mergedOrders = orderData.orders.map(order => {
                 const commissionOrder = commissionOrdersMap[String(order.id)];
                 return {
                     ...order,
                     ...commissionOrder
                 };
             });
+
+            // --- Date Filtering Logic ---
+            let startDate, endDate;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            switch (dateRange) {
+                case 'today':
+                    startDate = new Date(today);
+                    endDate = new Date(today);
+                    endDate.setHours(23, 59, 59, 999);
+                    break;
+                case 'yesterday':
+                    startDate = new Date(today);
+                    startDate.setDate(startDate.getDate() - 1);
+                    endDate = new Date(startDate);
+                    endDate.setHours(23, 59, 59, 999);
+                    break;
+                case 'last_7_days':
+                    startDate = new Date(today);
+                    startDate.setDate(startDate.getDate() - 6);
+                    endDate = new Date();
+                    endDate.setHours(23, 59, 59, 999);
+                    break;
+                case 'month_to_date':
+                    startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+                    endDate = new Date();
+                    endDate.setHours(23, 59, 59, 999);
+                    break;
+                case 'custom':
+                    if (startDateParam) {
+                        startDate = new Date(startDateParam);
+                        startDate.setHours(0, 0, 0, 0);
+                    }
+                    if (endDateParam) {
+                        endDate = new Date(endDateParam);
+                        endDate.setHours(23, 59, 59, 999);
+                    }
+                    break;
+                case 'all':
+                default:
+                    // No date filtering needed
+                    break;
+            }
+
+            if (startDate && endDate) {
+                mergedOrders = mergedOrders.filter(order => {
+                    const orderDate = new Date(order.created_at);
+                    return orderDate >= startDate && orderDate <= endDate;
+                });
+            }
+
 
             let settlementPending = 0;
             let totalCommissionEarned = 0;
@@ -1416,12 +1634,22 @@ const server = http.createServer(async (req, res) => {
                 }
             }
 
-            const currencyFormatter = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
+            const vendorMap = vendors.reduce((map, vendor) => {
+                map[vendor._id] = vendor.name;
+                return map;
+            }, {});
 
-            renderView(res, invoicesTemplatePath, {
+            const processedManualOrders = manualOrders.map(order => ({
+                ...order,
+                vendor_name: vendorMap[order.manual_vendor_id] || 'Unknown Vendor'
+            }));
+
+            const currencyFormatter = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
+            
+            const renderData = {
                 orders: mergedOrders,
                 vendors,
-                manualOrders,
+                manualOrders: processedManualOrders,
                 productImages,
                 settlementPending: currencyFormatter.format(settlementPending),
                 totalCommissionEarned: currencyFormatter.format(totalCommissionEarned),
@@ -1429,8 +1657,13 @@ const server = http.createServer(async (req, res) => {
                 totalAmountCollected: currencyFormatter.format(totalAmountCollected),
                 totalGstOnCommission: currencyFormatter.format(totalGstOnCommission),
                 totalDiscountByVendors: currencyFormatter.format(totalDiscountByVendors),
-                totalDiscountByCroscrow: currencyFormatter.format(totalDiscountByCroscrow)
-            }, 0);
+                totalDiscountByCroscrow: currencyFormatter.format(totalDiscountByCroscrow),
+                start_date: startDateParam,
+                end_date: endDateParam,
+                [`selected_date_range_${dateRange}`]: 'selected'
+            };
+
+            renderView(res, invoicesTemplatePath, renderData, 0);
         } catch (error) {
             console.error('Error fetching invoices data:', error);
             renderView(res, invoicesTemplatePath, {
@@ -1597,25 +1830,34 @@ const server = http.createServer(async (req, res) => {
     } else if (req.url.startsWith('/invoices/generate') && req.method === 'GET') {
         const invoiceTemplatePath = path.join(__dirname, 'views', 'invoice-template.html');
         try {
+            console.log("--- Generating Invoice ---");
             const url = new URL(req.url, `http://${req.headers.host}`);
             const orderId = url.searchParams.get('order_id');
+            console.log("Order ID:", orderId);
+
             const [orderData, commissionOrders, croscrowSettings] = await Promise.all([
                 fetchFromShopify(`/admin/api/2024-04/orders/${orderId}.json`),
                 getCommissionOrders(),
                 getCroscrowSettings()
             ]);
 
+            console.log("Fetched", commissionOrders.length, "commission orders.");
+
             const order = orderData.order;
             if (!order) {
                 throw new Error('Order not found.');
             }
 
-            const commissionOrder = commissionOrders.find(co => co.order_id == order.id);
+            const commissionOrder = commissionOrders.find(co => co.order_id == String(order.id));
+            console.log("Found commission order:", commissionOrder);
+
             if (!commissionOrder) {
                 throw new Error('Commission data not found for this order. Please save vendor and other details first.');
             }
 
             const vendor = await getCroscrowVendorById(commissionOrder.vendor_id);
+            console.log("Found vendor:", vendor);
+
             if (!vendor) {
                 throw new Error('Vendor not found for this order.');
             }
