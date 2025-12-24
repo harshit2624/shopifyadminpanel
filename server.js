@@ -572,112 +572,105 @@ function renderView(res, templatePath, data, commissionPercentage) {
                 vendorsHtml = '<tr><td colspan="3">No vendors found. Add one above to get started.</td></tr>';
             } else {
                 vendorsHtml = vendors.map(vendor => {
-                    let productsHtml = '';
-                    let ordersHtml = '';
+                    let productsContent = '';
                     if (vendor.products && vendor.products.length > 0) {
-                        productsHtml = `
-                            <tr>
-                                <td colspan="3">
-                                    <div style="padding: 15px; border-top: 1px solid #e1e4e8;">
-                                        <h4>Products from ${vendor.name}</h4>
-                                        <table style="width: 100%;">
-                                            <thead>
-                                                <tr>
-                                                    <th><input type="checkbox" class="select-all-vendor-products" data-vendor-id="${vendor._id}"></th>
-                                                    <th>Image</th>
-                                                    <th>Product</th>
-                                                    <th>Category</th>
-                                                    <th>Variations (Sizes)</th>
-                                                    <th>Price</th>
-                                                    <th>Sale Price</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                                                                 ${vendor.products.map(product => {
-                                                                                                    const productForDataAttr = { ...product };
-                                                                                                    return `
-                                                                                                    <tr class="product-row" data-vendor-id="${vendor._id}" data-product='${JSON.stringify(productForDataAttr).replace(/'/g, "&apos;").replace(/"/g, "&quot;")}'>
-                                                                                                        <td><input type="checkbox" class="product-checkbox" data-product-id="${product.id}"></td>
-                                                                                                        <td><img src="${product.image ? product.image.src : ''}" alt="${product.title}" width="40"></td>
-                                                                                                        <td>${product.title}</td>
-                                                                                                        <td>${product.product_type}</td>
-                                                                                                        <td>${product.variants.map(v => v.title).join(', ')}</td>
-                                                                                                        <td>${product.variants.map(v => v.price).join(', ')}</td>
-                                                                                                        <td>${product.variants.map(v => v.compare_at_price || 'N/A').join(', ')}</td>
-                                                                                                    </tr>
-                                                                                                `}).join('')}                                            </tbody>
-                                        </table>
-                                        <div style="margin-top: 15px;">
-                                            <button class="button sync-selected-btn" data-vendor-id="${vendor._id}" data-sync-type="full">Sync Selected</button>
-                                            <button class="button sync-all-btn" data-vendor-id="${vendor._id}" data-sync-type="full">Sync All</button>
-                                            <button class="button sync-inventory-btn" data-vendor-id="${vendor._id}" data-sync-type="inventory">Sync Inventory Only</button>
-                                            <button class="button sync-photos-btn" data-vendor-id="${vendor._id}" data-sync-type="photos">Sync Photos Only</button>
-                                        </div>
-                                        <div class="sync-status" data-vendor-id="${vendor._id}" style="margin-top: 15px; display: none;">
-                                            <div class="loading-indicator"></div>
-                                            <pre class="sync-logs"></pre>
-                                        </div>
-                                    </div>
-                                </td>
-                            </tr>
+                        productsContent = `
+                            <div style="padding: 15px; border-top: 1px solid #e1e4e8;">
+                                <h4>Products from ${vendor.name}</h4>
+                                <table style="width: 100%;">
+                                    <thead>
+                                        <tr>
+                                            <th><input type="checkbox" class="select-all-vendor-products" data-vendor-id="${vendor._id}"></th>
+                                            <th>Image</th>
+                                            <th>Product</th>
+                                            <th>Category</th>
+                                            <th>Variations (Sizes)</th>
+                                            <th>Price</th>
+                                            <th>Sale Price</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                                                         ${vendor.products.map(product => {
+                                                                            const productForDataAttr = { ...product };
+                                                                            return `
+                                                                            <tr class="product-row" data-vendor-id="${vendor._id}" data-product='${JSON.stringify(productForDataAttr).replace(/'/g, "&apos;").replace(/"/g, "&quot;")}'>
+                                                                                <td><input type="checkbox" class="product-checkbox" data-product-id="${product.id}"></td>
+                                                                                <td><img src="${product.image ? product.image.src : ''}" alt="${product.title}" width="40"></td>
+                                                                                <td>${product.title}</td>
+                                                                                <td>${product.product_type}</td>
+                                                                                <td>${product.variants.map(v => v.title).join(', ')}</td>
+                                                                                <td>${product.variants.map(v => v.price).join(', ')}</td>
+                                                                                <td>${product.variants.map(v => v.compare_at_price || 'N/A').join(', ')}</td>
+                                                                            </tr>
+                                                                        `}).join('')}                                            </tbody>
+                                </table>
+                                <div style="margin-top: 15px;">
+                                    <button class="button sync-selected-btn" data-vendor-id="${vendor._id}" data-sync-type="full">Sync Selected</button>
+                                    <button class="button sync-all-btn" data-vendor-id="${vendor._id}" data-sync-type="full">Sync All</button>
+                                    <button class="button sync-inventory-btn" data-vendor-id="${vendor._id}" data-sync-type="inventory">Sync Inventory Only</button>
+                                    <button class="button sync-photos-btn" data-vendor-id="${vendor._id}" data-sync-type="photos">Sync Photos Only</button>
+                                </div>
+                                <div class="sync-status" data-vendor-id="${vendor._id}" style="margin-top: 15px; display: none;">
+                                    <div class="loading-indicator"></div>
+                                    <pre class="sync-logs"></pre>
+                                </div>
+                            </div>
                         `;
                     }
+
+                    let ordersContent = '';
                     if (vendor.orders && vendor.orders.length > 0) {
-                        ordersHtml = `
-                            <tr>
-                                <td colspan="3">
-                                    <div style="padding: 15px; border-top: 1px solid #e1e4e8;">
-                                        <h4>Orders from ${vendor.name}</h4>
-                                        <table style="width: 100%;">
-                                            <thead>
-                                                <tr>
-                                                    <th>Order Number</th>
-                                                    <th>Date</th>
-                                                    <th>Customer</th>
-                                                    <th>Total</th>
-                                                    <th>Actions</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                ${vendor.orders.map(order => `
-                                                    <tr class="order-summary-row" data-order-id="${order.id}">
-                                                        <td>#${order.order_number}</td>
-                                                        <td>${new Date(order.created_at).toLocaleDateString()}</td>
-                                                        <td>${getCustomerNameFromOrder(order)}</td>
-                                                        <td>$${order.total_price}</td>
-                                                        <td><button class="button toggle-details-btn" data-order-id="${order.id}">Details</button></td>
-                                                    </tr>
-                                                    <tr class="order-details-row" id="details-${order.id}" style="display: none;">
-                                                        <td colspan="5">
-                                                            <div style="display: flex; padding: 20px; background-color: #f9f9f9;">
-                                                                <div style="flex: 1;">
-                                                                    <h4>Customer Details</h4>
-                                                                    <p><strong>Name:</strong> ${getCustomerNameFromOrder(order)}</p>
-                                                                    <p><strong>Phone:</strong> ${order.customer && order.customer.phone ? order.customer.phone : 'N/A'}</p>
-                                                                    <p><strong>Shipping Address:</strong> ${order.shipping_address ? `${order.shipping_address.address1}, ${order.shipping_address.city}, ${order.shipping_address.zip}, ${order.shipping_address.country}` : 'N/A'}</p>
+                        ordersContent = `
+                            <div style="padding: 15px; border-top: 1px solid #e1e4e8;">
+                                <h4>Orders from ${vendor.name}</h4>
+                                <table style="width: 100%;">
+                                    <thead>
+                                        <tr>
+                                            <th>Order Number</th>
+                                            <th>Date</th>
+                                            <th>Customer</th>
+                                            <th>Total</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${vendor.orders.map(order => `
+                                            <tr class="order-summary-row" data-order-id="${order.id}">
+                                                <td>#${order.order_number}</td>
+                                                <td>${new Date(order.created_at).toLocaleDateString()}</td>
+                                                <td>${getCustomerNameFromOrder(order)}</td>
+                                                <td>$${order.total_price}</td>
+                                                <td><button class="button toggle-details-btn" data-order-id="${order.id}">Details</button></td>
+                                            </tr>
+                                            <tr class="order-details-row" id="details-${order.id}" style="display: none;">
+                                                <td colspan="5">
+                                                    <div style="display: flex; padding: 20px; background-color: #f9f9f9;">
+                                                        <div style="flex: 1;">
+                                                            <h4>Customer Details</h4>
+                                                            <p><strong>Name:</strong> ${getCustomerNameFromOrder(order)}</p>
+                                                            <p><strong>Phone:</strong> ${order.customer && order.customer.phone ? order.customer.phone : 'N/A'}</p>
+                                                            <p><strong>Shipping Address:</strong> ${order.shipping_address ? `${order.shipping_address.address1}, ${order.shipping_address.city}, ${order.shipping_address.zip}, ${order.shipping_address.country}` : 'N/A'}</p>
+                                                        </div>
+                                                        <div style="flex: 2; padding-left: 20px;">
+                                                            <h4>Product Details</h4>
+                                                            ${order.line_items.map(item => `
+                                                                <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                                                                    <img src="${vendor.productImages[item.product_id] || ''}" alt="${item.title}" width="60" style="margin-right: 15px; border-radius: 4px;">
+                                                                    <div>
+                                                                        <strong>${item.title}</strong><br>
+                                                                        Quantity: ${item.quantity}<br>
+                                                                        Price: $${item.price}
+                                                                    </div>
                                                                 </div>
-                                                                <div style="flex: 2; padding-left: 20px;">
-                                                                    <h4>Product Details</h4>
-                                                                    ${order.line_items.map(item => `
-                                                                        <div style="display: flex; align-items: center; margin-bottom: 10px;">
-                                                                            <img src="${vendor.productImages[item.product_id] || ''}" alt="${item.title}" width="60" style="margin-right: 15px; border-radius: 4px;">
-                                                                            <div>
-                                                                                <strong>${item.title}</strong><br>
-                                                                                Quantity: ${item.quantity}<br>
-                                                                                Price: $${item.price}
-                                                                            </div>
-                                                                        </div>
-                                                                    `).join('')}
-                                                                </div>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                `).join('')}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </td>
-                            </tr>
+                                                            `).join('')}
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
                         `;
                     }
 
@@ -687,10 +680,28 @@ function renderView(res, templatePath, data, commissionPercentage) {
                             <td>${vendor.shopifyShopName}</td>
                             <td>
                                 <a href="#" class="button sync-btn" data-vendor-id="${vendor._id}">Sync Products</a>
+                                ${productsContent ? `
+                                    <button class="button toggle-vendor-section-btn" data-target="products-${vendor._id}">
+                                        Products (${vendor.products.length})
+                                    </button>
+                                ` : ''}
+                                ${ordersContent ? `
+                                    <button class="button toggle-vendor-section-btn" data-target="orders-${vendor._id}">
+                                        Orders (${vendor.orders.length})
+                                    </button>
+                                ` : ''}
                             </td>
                         </tr>
-                        ${productsHtml}
-                        ${ordersHtml}
+                        ${productsContent ? `
+                            <tr id="products-${vendor._id}" class="vendor-section" style="display: none;">
+                                <td colspan="3">${productsContent}</td>
+                            </tr>
+                        ` : ''}
+                        ${ordersContent ? `
+                            <tr id="orders-${vendor._id}" class="vendor-section" style="display: none;">
+                                <td colspan="3">${ordersContent}</td>
+                            </tr>
+                        ` : ''}
                     `;
                 }).join('');
             }
@@ -1228,36 +1239,40 @@ const server = http.createServer(async (req, res) => {
         try {
             const vendors = await getVendors();
             for (const vendor of vendors) {
-                try {
-                    const [vendorProducts, vendorOrders] = await Promise.all([
-                        fetchFromShopify('/admin/api/2024-04/products.json', {
-                            shopName: vendor.shopifyShopName,
-                            accessToken: vendor.shopifyAccessToken
-                        }),
-                        fetchFromShopify('/admin/api/2024-04/orders.json', {
-                            shopName: vendor.shopifyShopName,
-                            accessToken: vendor.shopifyAccessToken
-                        })
-                    ]);
-                    vendor.products = vendorProducts.products;
-                    vendor.orders = vendorOrders.orders;
-
-                    const productImages = {};
-                    if (vendor.products) {
-                        vendor.products.forEach(p => {
-                            if (p.image) {
-                                productImages[p.id] = p.image.src;
-                            }
-                        });
-                    }
-                    vendor.productImages = productImages;
-
-                } catch (e) {
-                    console.error(`Failed to fetch data for vendor ${vendor.name}:`, e.message);
-                    vendor.products = []; // Ensure products is an empty array on error
-                    vendor.orders = []; // Ensure orders is an empty array on error
-                }
-            }
+                            try {
+                                                const [vendorProducts, vendorOrders] = await Promise.all([
+                                                    fetchAllProducts({
+                                                        shopName: vendor.shopifyShopName,
+                                                        accessToken: vendor.shopifyAccessToken
+                                                    }).catch(e => {
+                                                        console.error(`Failed to fetch products for vendor ${vendor.name}: ${e.message}`);
+                                                        return { products: [] }; // Return default value on error
+                                                    }),
+                                                    fetchAllOrders({
+                                                        shopName: vendor.shopifyShopName,
+                                                        accessToken: vendor.shopifyAccessToken
+                                                    }).catch(e => {
+                                                        console.error(`Failed to fetch orders for vendor ${vendor.name}: ${e.message}`);
+                                                        return { orders: [] }; // Return default value on error
+                                                    })
+                                                ]);                                vendor.products = vendorProducts.products;
+                                vendor.orders = vendorOrders.orders;
+                
+                                const productImages = {};
+                                if (vendor.products) {
+                                    vendor.products.forEach(p => {
+                                        if (p.image) {
+                                            productImages[p.id] = p.image.src;
+                                        }
+                                    });
+                                }
+                                vendor.productImages = productImages;
+                
+                            } catch (e) {
+                                console.error(`Failed to fetch data for vendor ${vendor.name}:`, e.message);
+                                vendor.products = []; // Ensure products is an empty array on error
+                                vendor.orders = []; // Ensure orders is an empty array on error
+                            }            }
             renderView(res, vendorsTemplatePath, { vendors }, 0);
         } catch (error) {
             console.error('Error fetching vendors:', error);
@@ -2247,6 +2262,7 @@ const server = http.createServer(async (req, res) => {
                                         const { product_id, ...rest } = v;
                                         return rest;
                                     }),
+                                     images: product.images || []
                                 }
                             };
                             await putToShopify(`/admin/api/2024-04/products/${existingProductId}.json`, updatePayload);
@@ -2257,9 +2273,8 @@ const server = http.createServer(async (req, res) => {
                             
                             newProductPayload = {
                                 product: {
-                                    title: product.title,
-                                    body_html: '',
-                                    vendor: vendor.name,
+                                                                title: product.title,
+                                                                body_html: '',                                    vendor: vendor.name,
                                     status: product.status || 'active',
                                     images: product.images || []
                                 }
@@ -2363,30 +2378,70 @@ const server = http.createServer(async (req, res) => {
                 for (const product of productsToSync) {
                     res.write(`Syncing inventory for: ${product.title}...\n`);
                     
-                    try {
-                        const existingProduct = mainStoreProductMap[product.title];
-
-                        if (existingProduct) {
-                            res.write(`  -> Found existing product. Updating inventory and variants...\n`);
-                            
-                            const existingVariants = existingProduct.variants;
-                            const existingVariantMap = existingVariants.reduce((map, variant) => {
-                                if (variant.sku) map[variant.sku] = variant;
+                                    try {
+                                        let existingProduct = mainStoreProductMap[product.title];
+                                    if (existingProduct) {
+                                        res.write(`  -> Found existing product. Updating inventory and variants...\n`);
+                                        
+                                                                        // Check and update product options if they differ
+                                                                        if (JSON.stringify(product.options) !== JSON.stringify(existingProduct.options)) {
+                                                                            res.write('  -> Options differ. Updating product options...\n');
+                                                                            
+                                                                            const newOptions = product.options.map(opt => ({ name: opt.name, values: opt.values }));
+                                                        
+                                                                            const newVariantsPayload = product.variants.map(v => ({
+                                                                                option1: v.option1,
+                                                                                option2: v.option2,
+                                                                                option3: v.option3,
+                                                                                price: v.price,
+                                                                                sku: v.sku,
+                                                                                compare_at_price: v.compare_at_price,
+                                                                                inventory_management: 'shopify'
+                                                                            }));
+                                                        
+                                                                            await putToShopify(`/admin/api/2024-04/products/${existingProduct.id}.json`, {
+                                                                                product: {
+                                                                                    id: existingProduct.id,
+                                                                                    options: newOptions,
+                                                                                    variants: newVariantsPayload
+                                                                                }
+                                                                            });
+                                                                            res.write('  -> Product options updated.\n');
+                                                                            // Re-fetch the product to get the updated variant structure
+                                                                            const updatedProductData = await fetchFromShopify(`/admin/api/2024-04/products/${existingProduct.id}.json`);
+                                                                            existingProduct = updatedProductData.product;
+                                                                        }                                        const existingVariants = existingProduct.variants;                            const existingVariantMap = existingVariants.reduce((map, variant) => {
+                                const key = [variant.option1, variant.option2, variant.option3].filter(Boolean).join(' / ');
+                                if (key) {
+                                    map[key] = variant;
+                                }
                                 return map;
                             }, {});
 
                             for (const v of product.variants) {
-                                const existingVariant = v.sku ? existingVariantMap[v.sku] : null;
+                                const key = [v.option1, v.option2, v.option3].filter(Boolean).join(' / ');
+                                const existingVariant = key ? existingVariantMap[key] : null;
                                 if (existingVariant) {
-                                    // Update existing variant
-                                    const inventoryPayload = {
-                                        location_id: locationId,
-                                        inventory_item_id: existingVariant.inventory_item_id,
-                                        available: Math.max(0, Number(v.inventory_quantity || 0)),
-                                    };
-                                    await postToShopify(`/admin/api/2024-04/inventory_levels/set.json`, inventoryPayload);
-                                    res.write(`  -> Successfully synced inventory for variant with SKU: ${v.sku}.\n\n`);
-                                } else {
+                                                                                                              const variantUpdatePayload = {
+                                                                                                                 variant: {
+                                                                                                                     id: existingVariant.id,
+                                                                                                                     price: String(v.price || "0"),
+                                                                                                                     compare_at_price: v.compare_at_price ? String(v.compare_at_price) : null,
+                                                                                                                     sku: v.sku,
+                                                                                                                     option1: v.option1,
+                                                                                                                     option2: v.option2,
+                                                                                                                     option3: v.option3,
+                                                                                                                     inventory_management: 'shopify'
+                                                                                                                 }
+                                                                                                             };
+                                                                                                             await putToShopify(`/admin/api/2024-04/variants/${existingVariant.id}.json`, variantUpdatePayload);                                    
+                                                                        const inventoryPayload = {
+                                                                            location_id: locationId,
+                                                                            inventory_item_id: existingVariant.inventory_item_id,
+                                                                            available: Math.max(0, Number(v.inventory_quantity || 0)),
+                                                                        };
+                                                                        await postToShopify(`/admin/api/2024-04/inventory_levels/set.json`, inventoryPayload);
+                                                                        res.write(`  -> Successfully synced inventory and price for variant with SKU: ${v.sku}.\n\n`);                                } else {
                                     // Create new variant
                                     const newVariantPayload = {
                                         variant: {
@@ -2470,7 +2525,7 @@ const server = http.createServer(async (req, res) => {
                                 const updatePayload = {
                                     product: {
                                         id: existingProductId,
-                                        images: product.images || []
+                                        images: product.images.map(img => ({ src: img.src }))
                                     }
                                 };
                                 await putToShopify(`/admin/api/2024-04/products/${existingProductId}.json`, updatePayload);

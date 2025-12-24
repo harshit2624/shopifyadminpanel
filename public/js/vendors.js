@@ -147,4 +147,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     });
+
+    // --- Event listener for toggling vendor sections (Products/Orders) ---
+    document.querySelectorAll('.toggle-vendor-section-btn').forEach(button => {
+        button.addEventListener('click', event => {
+            const targetId = event.target.dataset.target;
+            const targetElement = document.getElementById(targetId);
+            if (targetElement) {
+                targetElement.style.display = targetElement.style.display === 'none' ? '' : 'none';
+            }
+        });
+    });
 });
