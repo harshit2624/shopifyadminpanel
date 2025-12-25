@@ -154,6 +154,10 @@
                         <input type="number" id="manual_amount_received" name="amount_received" placeholder="e.g., 50">
                     </div>
                     <div style="flex: 1 1 150px;">
+                        <label for="manual_commission">Commission %</label>
+                        <input type="number" id="manual_commission" name="manual_commission" placeholder="e.g., 20">
+                    </div>
+                    <div style="flex: 1 1 150px;">
                         <button type="submit">Generate Invoice</button>
                         <button type="button" id="save-manual-invoice">Save</button>
                     </div>
@@ -209,6 +213,7 @@
                         <th>Discount Type</th>
                         <th>Discount</th>
                         <th>Amount Received</th>
+                        <th>Commission %</th>
                         <th>Actions</th>
                     </tr>
                 </thead>

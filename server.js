@@ -787,6 +787,7 @@ function renderView(res, templatePath, data, commissionPercentage) {
                             </td>
                             <td><input type="number" class="manual-discount" placeholder="e.g., 100" value="${discountValue}"></td>
                             <td><input type="number" class="amount-received" placeholder="e.g., 50" value="${order.amount_received || ''}"></td>
+                            <td><input type="number" class="manual-commission" placeholder="e.g., 20" value="${order.commission_percentage || ''}"></td>
                             <td class="action-cell">
                                 <button class="button save-btn" data-order-id="${order.id}">Save</button>
                                 <a href="/invoices/generate?order_id=${order.id}" class="button" target="_blank">Invoice</a>
@@ -1398,7 +1399,9 @@ const server = http.createServer(async (req, res) => {
                 commissionable_amount -= discount;
             }
 
-            const base_commission = commissionable_amount * 0.20;
+            const commission_rate = (manualOrder && manualOrder.commission_percentage) ? (parseFloat(manualOrder.commission_percentage) / 100) : 0.20;
+            const base_commission = commissionable_amount * commission_rate;
+            const commission_percentage_display = commission_rate * 100;
             const shipping = parseFloat(manualOrder.manual_shipping || 0);
             
             let subtotal = base_commission + shipping;
@@ -1427,6 +1430,7 @@ const server = http.createServer(async (req, res) => {
                 gst_formatted: currencyFormatter.format(gst),
                 amount_received_formatted: currencyFormatter.format(amount_received),
                 total_commission_formatted: currencyFormatter.format(total_commission),
+                commission_percentage_display: commission_percentage_display
             };
 
             renderView(res, invoiceTemplatePath, invoiceData, 0);
@@ -1482,7 +1486,9 @@ const server = http.createServer(async (req, res) => {
                 commissionable_amount -= discount;
             }
 
-            const base_commission = commissionable_amount * 0.20;
+            const commission_rate = (commissionOrder && commissionOrder.commission_percentage) ? (parseFloat(commissionOrder.commission_percentage) / 100) : 0.20;
+            const base_commission = commissionable_amount * commission_rate;
+            const commission_percentage_display = commission_rate * 100;
 
             const shipping = parseFloat(commissionOrder.manual_shipping || 0);
             
@@ -1513,6 +1519,7 @@ const server = http.createServer(async (req, res) => {
                 gst_formatted: currencyFormatter.format(gst),
                 amount_received_formatted: currencyFormatter.format(amount_received),
                 total_commission_formatted: currencyFormatter.format(total_commission),
+                commission_percentage_display: commission_percentage_display
             };
 
             renderView(res, invoiceTemplatePath, invoiceData, 0);
@@ -1636,7 +1643,8 @@ const server = http.createServer(async (req, res) => {
                             totalDiscountByCroscrow += discount;
                         }
 
-                        const base_commission = commissionable_amount * 0.20;
+const commission_rate = (order && order.commission_percentage) ? (parseFloat(order.commission_percentage) / 100) : 0.20;
+            const base_commission = commissionable_amount * commission_rate;
                         const shipping = parseFloat(order.manual_shipping || 0);
                         
                         let subtotal = base_commission + shipping;
@@ -1706,7 +1714,8 @@ const server = http.createServer(async (req, res) => {
                     manual_shipping: postData.manual_shipping,
                     discount_type: postData.discount_type,
                     manual_discount: postData.manual_discount,
-                    amount_received: postData.amount_received
+                    amount_received: postData.amount_received,
+                    commission_percentage: postData.commission_percentage
                 });
                 res.writeHead(200, {
                     'Content-Type': 'application/json'
@@ -1781,6 +1790,7 @@ const server = http.createServer(async (req, res) => {
                     discount_type: postData.discount_type || '',
                     manual_discount: postData.manual_discount || 0,
                     amount_received: postData.amount_received || 0,
+                    commission_percentage: postData.manual_commission || 0
                 };
 
                 // Create a mock order object that mimics the Shopify order structure
@@ -1805,7 +1815,9 @@ const server = http.createServer(async (req, res) => {
                     commissionable_amount -= discount;
                 }
 
-                const base_commission = commissionable_amount * 0.20;
+                const commission_rate = (commissionOrder && commissionOrder.commission_percentage) ? (parseFloat(commissionOrder.commission_percentage) / 100) : 0.20;
+            const base_commission = commissionable_amount * commission_rate;
+            const commission_percentage_display = commission_rate * 100;
 
                 const shipping = parseFloat(commissionOrder.manual_shipping || 0);
                 
@@ -1836,6 +1848,7 @@ const server = http.createServer(async (req, res) => {
                     gst_formatted: currencyFormatter.format(gst),
                     amount_received_formatted: currencyFormatter.format(amount_received),
                     total_commission_formatted: currencyFormatter.format(total_commission),
+                    commission_percentage_display: commission_percentage_display
                 };
 
                 renderView(res, invoiceTemplatePath, invoiceData, 0);
@@ -1861,6 +1874,7 @@ const server = http.createServer(async (req, res) => {
                     discount_type: postData.discount_type,
                     manual_discount: postData.manual_discount,
                     amount_received: postData.amount_received,
+                    commission_percentage: postData.manual_commission,
                     createdAt: new Date()
                 };
                 await saveManualOrder(manualOrder);
@@ -1926,7 +1940,9 @@ const server = http.createServer(async (req, res) => {
                 commissionable_amount -= discount;
             }
 
-            const base_commission = commissionable_amount * 0.20;
+            const commission_rate = (commissionOrder && commissionOrder.commission_percentage) ? (parseFloat(commissionOrder.commission_percentage) / 100) : 0.20;
+            const base_commission = commissionable_amount * commission_rate;
+            const commission_percentage_display = commission_rate * 100;
 
             const shipping = parseFloat(commissionOrder.manual_shipping || 0);
             
@@ -1957,6 +1973,7 @@ const server = http.createServer(async (req, res) => {
                 gst_formatted: currencyFormatter.format(gst),
                 amount_received_formatted: currencyFormatter.format(amount_received),
                 total_commission_formatted: currencyFormatter.format(total_commission),
+                commission_percentage_display: commission_percentage_display
             };
 
             renderView(res, invoiceTemplatePath, invoiceData, 0);
@@ -2220,10 +2237,8 @@ const server = http.createServer(async (req, res) => {
                             updatePayload = {
                                 product: {
                                     id: existingProductId,
-                                    title: product.title,
-                                    body_html: '',
-                                    vendor: vendor.name,
-                                    product_type: product.product_type,
+                                                                title: product.title,
+                                                                vendor: vendor.name,                                    product_type: product.product_type,
                                     tags: product.tags,
                                     status: product.status || 'active',
                                     options: product.options.map(opt => ({
@@ -2273,8 +2288,8 @@ const server = http.createServer(async (req, res) => {
                             
                             newProductPayload = {
                                 product: {
-                                                                title: product.title,
-                                                                body_html: '',                                    vendor: vendor.name,
+                                                                                            title: product.title,
+                                                                                            vendor: vendor.name,
                                     status: product.status || 'active',
                                     images: product.images || []
                                 }

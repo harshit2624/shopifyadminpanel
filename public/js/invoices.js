@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const discountType = row.querySelector('.discount-type').value;
             const manualDiscount = row.querySelector('.manual-discount').value;
             const amountReceived = row.querySelector('.amount-received').value;
+            const commissionPercentage = row.querySelector('.manual-commission').value;
 
             const response = await fetch('/invoices/assign-vendor', {
                 method: 'POST',
@@ -22,7 +23,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     manual_shipping: manualShipping,
                     discount_type: discountType,
                     manual_discount: manualDiscount,
-                    amount_received: amountReceived
+                    amount_received: amountReceived,
+                    commission_percentage: commissionPercentage
                 })
             });
 
